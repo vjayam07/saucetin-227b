@@ -62,7 +62,7 @@
       }
 
       function play(move) {
-        if (move != null) state = simulate(move, state, library);
+        if (move !== nil) { state = simulate(move, state, library); }
         if (findcontrol(state, library) !== role) return false;
         return findBestMove(state);
       }

@@ -1,6 +1,6 @@
 <html>
   <head>
-    <title>saucetin_maximax_single</title>
+    <title>saucetin_minimax_single</title>
     <script
       type="text/javascript"
       src="http://epilog.stanford.edu/javascript/epilog.js"
@@ -56,7 +56,7 @@
       }
 
       function play(move) {
-        if (move != null) state = simulate(move, state, library);
+        if (move !== nil) { state = simulate(move, state, library); }
         if (findcontrol(state, library) !== role) return false;
         return findBestMove(state);
       }
