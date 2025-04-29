@@ -2,7 +2,14 @@
   <!--
   Iterative Deepening Minimax Player: Comprehensive Analysis
   =======================================================
-
+  Reflection: 
+  For Assignment 4, we built on our previous minimax agent from Assignment 3 by adding iterative deepening. This allowed the agent to gradually increase search depth while staying within the time limits. Implementing this helped us make sure that there is more effective  use of the available playclock making sure that we have a move ready if the search is interrupted. 
+  One roadblock that we faced during development was related to the agent timing out when it searched too deeply. Through trial and error, we did find that when we set a more lower max depth making sure that we are checking the clock more frequently, we found that the agent was more reliable with better testing outcomes. We found this to be true especially in larger games. 
+  Similarly to our last assignment, we kept with the mobility heuristic as our default since it worked well across different scenarios, but we also left other heuristics in the code for flexibility. We tested the final agent against the course’s Legal player across multiple games where we found that it consistently won in all the matchups. This makes us believe that the iterative 
+  deepening was able to create a strong difference in performance, largely due to the fact that the agent had more room to explore stronger moves through its depth while still managing to meet the playclock deadline. 
+  
+  ---------------------
+  
   Our implementation demonstrates a sophisticated approach to general game playing through iterative deepening minimax search. We have combined several advanced techniques to create a robust and efficient game-playing agent.
 
   Core Algorithm Structure:
