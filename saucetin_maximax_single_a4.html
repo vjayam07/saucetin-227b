@@ -1,0 +1,276 @@
+<html>
+  <head>
+    <title>saucetin_maximax_single</title>
+    <script
+      type="text/javascript"
+      src="http://epilog.stanford.edu/javascript/epilog.js"
+    ></script>
+    <script
+      type="text/javascript"
+      src="http://gamemaster.stanford.edu/javascript/localstorage.js"
+    ></script>
+    <script
+      type="text/javascript"
+      src="http://gamemaster.stanford.edu/interpreter/general.js"
+    ></script>
+    <script type="text/javascript">
+      //==============================================================================
+      // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
+      //==============================================================================
+
+      var manager = "manager";
+      var player = "saucetin_maximax_single";
+
+      var role = "robot";
+      var rules = [];
+      var startclock = 10;
+      var playclock = 10;
+
+      var library = [];
+      var roles = [];
+      var state = [];
+
+      // State cache with depth tracking
+      var stateCache = {};
+      var maxDepth = 3; // Initial depth for iterative deepening
+
+      //==============================================================================
+
+      function ping() {
+        return "ready";
+      }
+
+      function start(r, rs, sc, pc) {
+        role = r;
+        rules = rs.slice(1);
+        startclock = numberize(sc);
+        playclock = numberize(pc);
+        library = definemorerules([], rules);
+        roles = findroles(library);
+        state = findinits(library);
+
+        // Reset cache and adjust depth based on playclock
+        stateCache = {};
+        maxDepth = Math.min(5, Math.floor(playclock / 2));
+        return "ready";
+      }
+
+      function play(move) {
+        if (move != null) state = simulate(move, state, library);
+        if (findcontrol(state, library) !== role) return false;
+        return findBestMove(state);
+      }
+
+      function stop(move) {
+        return false;
+      }
+      function abort() {
+        return false;
+      }
+
+      function findBestMove(currentState) {
+        let bestMove = null;
+        let bestScore = -Infinity;
+        const legalMoves = findlegals(currentState, library);
+
+        // Iterative deepening with time management
+        for (let depth = 1; depth <= maxDepth; depth++) {
+          let currentBestMove = null;
+          let currentBestScore = -Infinity;
+
+          for (const move of legalMoves) {
+            const nextState = simulate(move, currentState, library);
+            const score = alphaBeta(
+              nextState,
+              depth,
+              -Infinity,
+              Infinity,
+              false
+            );
+
+            if (score > currentBestScore) {
+              currentBestScore = score;
+              currentBestMove = move;
+            }
+
+            // Early exit if we find a winning move
+            if (currentBestScore === 100) {
+              return currentBestMove;
+            }
+          }
+
+          bestMove = currentBestMove;
+          bestScore = currentBestScore;
+        }
+
+        return bestMove;
+      }
+
+      function alphaBeta(state, depth, alpha, beta, isMaximizing) {
+        const stateKey = JSON.stringify(state);
+
+        // Check cache
+        if (stateCache[stateKey] && stateCache[stateKey].depth >= depth) {
+          return stateCache[stateKey].score;
+        }
+
+        // Terminal state check
+        if (findterminalp(state, library)) {
+          const score = findreward(role, state, library) * 1;
+          stateCache[stateKey] = { depth, score };
+          return score;
+        }
+
+        // Depth limit reached
+        if (depth === 0) {
+          const score = evaluateState(state);
+          stateCache[stateKey] = { depth, score };
+          return score;
+        }
+
+        const legalMoves = findlegals(state, library);
+
+        if (isMaximizing) {
+          let value = -Infinity;
+          for (const move of legalMoves) {
+            const nextState = simulate(move, state, library);
+            value = Math.max(
+              value,
+              alphaBeta(nextState, depth - 1, alpha, beta, false)
+            );
+            alpha = Math.max(alpha, value);
+            if (alpha >= beta) break; // Beta cutoff
+          }
+          stateCache[stateKey] = { depth, score: value };
+          return value;
+        } else {
+          let value = Infinity;
+          for (const move of legalMoves) {
+            const nextState = simulate(move, state, library);
+            value = Math.min(
+              value,
+              alphaBeta(nextState, depth - 1, alpha, beta, true)
+            );
+            beta = Math.min(beta, value);
+            if (beta <= alpha) break; // Alpha cutoff
+          }
+          stateCache[stateKey] = { depth, score: value };
+          return value;
+        }
+      }
+
+      function evaluateState(state) {
+        // Simple evaluation function that considers:
+        // 1. Immediate rewards
+        // 2. Number of legal moves (mobility)
+        // 3. Control of the game state
+
+        let score = 0;
+
+        // Check for immediate rewards
+        const reward = findreward(role, state, library);
+        if (reward !== 0) {
+          return reward * 100; // Prioritize terminal states
+        }
+
+        // Consider mobility
+        const legalMoves = findlegals(state, library);
+        score += legalMoves.length * 2;
+
+        // Consider control
+        if (findcontrol(state, library) === role) {
+          score += 5;
+        }
+
+        return score;
+      }
+
+      
+      function pessimisticEval(state) {
+        if (findterminalp(state, library)) {
+          return findreward(role, state, library) * 100; // Big weight
+        }
+        return 0;
+      } 
+
+      //==============================================================================
+      // End of player code
+      //==============================================================================
+    </script>
+  </head>
+
+  <body bgcolor="#aabbbb" onload="doinitialize()">
+    <center>
+      <table width="720" cellspacing="0" cellpadding="40" bgcolor="#ffffff">
+        <tr>
+          <td>
+            <center>
+              <table width="640" cellpadding="0">
+                <tr>
+                  <td width="180" align="center" valign="center">
+                    <img
+                      width="130"
+                      src="http://gamemaster.stanford.edu/images/ggp.jpg"
+                    />
+                  </td>
+                  <td align="center">
+                    <span style="font-size: 18pt">&nbsp;</span>
+                    <span style="font-size: 32pt">Gamemaster</span><br />
+                  </td>
+                  <td
+                    width="180"
+                    align="center"
+                    style="color: #000066; font-size: 18px"
+                  >
+                    <i>General<br />Game<br />Playing</i>
+                  </td>
+                </tr>
+              </table>
+            </center>
+
+            <br />
+            <table
+              width="640"
+              cellpadding="8"
+              cellspacing="0"
+              bgcolor="#f4f8f8"
+              border="1"
+            >
+              <tr height="40">
+                <td align="center">
+                  <table style="color: #000066; font-size: 18px">
+                    <tr>
+                      <td>
+                        Protocol: localstorage<br />
+                        Metagamer: none<br />
+                        Strategy: alpha-beta with iterative deepening<br />
+                        Identifier:
+                        <span id="player">saucetin_maximax_single</span>
+                        <img
+                          src="http://gamemaster.stanford.edu/images/pencil.gif"
+                          onclick="doplayer()"
+                        />
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+            <br />
+
+            <center>
+              <br />
+              <textarea
+                id="transcript"
+                style="font-family: courier"
+                rows="30"
+                cols="80"
+                readonly
+              ></textarea>
+            </center>
+          </td>
+        </tr>
+      </table>
+    </center>
+  </body>
+</html>
