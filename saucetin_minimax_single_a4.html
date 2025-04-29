@@ -69,14 +69,16 @@
       }
 
       function findBestMove(currentState) {
-        let bestMove = null;
-        let bestScore = -Infinity;
         const legalMoves = findlegals(currentState, library);
+
+        const isMaximizing = (findcontrol(currentState, library) === role);
+        let bestMove = null;
+        let bestScore = isMaximizing ? -Infinity : Infinity;
 
         // Iterative deepening with time management
         for (let depth = 1; depth <= maxDepth; depth++) {
           let currentBestMove = null;
-          let currentBestScore = -Infinity;
+          let currentBestScore = isMaximizing ? -Infinity : Infinity;
 
           for (const move of legalMoves) {
             const nextState = simulate(move, currentState, library);
@@ -85,16 +87,23 @@
               depth,
               -Infinity,
               Infinity,
-              false
+              !isMaximizing
             );
 
-            if (score > currentBestScore) {
-              currentBestScore = score;
-              currentBestMove = move;
+            if (isMaximizing) {
+              if (score > currentBestScore) {
+                currentBestScore = score;
+                currentBestMove = move;
+              }
+            } else {
+              if (score < currentBestScore) {
+                currentBestScore = score;
+                currentBestMove = move;
+              }
             }
 
             // Early exit if we find a winning move
-            if (currentBestScore === 100) {
+            if (currentBestScore === 100 || currentBestScore === -100) {
               return currentBestMove;
             }
           }
@@ -160,29 +169,11 @@
       }
 
       function evaluateState(state) {
-        // Simple evaluation function that considers:
-        // 1. Immediate rewards
-        // 2. Number of legal moves (mobility)
-        // 3. Control of the game state
+        // Pick the eval method depending on our strategy
 
-        let score = 0;
-
-        // Check for immediate rewards
-        const reward = findreward(role, state, library);
-        if (reward !== 0) {
-          return reward * 100; // Prioritize terminal states
-        }
-
-        // Consider mobility
-        const legalMoves = findlegals(state, library);
-        score += legalMoves.length * 2;
-
-        // Consider control
-        if (findcontrol(state, library) === role) {
-          score += 5;
-        }
-
-        return score;
+        // return pessimisticEval(state);
+        return mobilityEval(state);
+        // return intermediateRewardEval(state);
       }
 
       
@@ -192,6 +183,19 @@
         }
         return 0;
       } 
+
+      function mobilityEval(state) {
+        const legalMoves = findlegals(state, library);
+        if (findcontrol(state, library) === role) {
+          return legalMoves.length * 10; // More moves for us
+        } else {
+          return -legalMoves.length * 10; // Fewer moves for opponent
+        }
+      }
+
+      function intermediateRewardEval(state) {
+        return findreward(role, state, library) * 100; // Immediate reward no matter what
+      }
 
       //==============================================================================
       // End of player code
