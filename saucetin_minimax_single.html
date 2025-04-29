@@ -71,6 +71,10 @@
       function findBestMove(currentState) {
         const legalMoves = findlegals(currentState, library);
 
+        if (legalMoves.length === 0) {
+          return false;
+        } 
+
         const isMaximizing = (findcontrol(currentState, library) === role);
         let bestMove = null;
         let bestScore = isMaximizing ? -Infinity : Infinity;
