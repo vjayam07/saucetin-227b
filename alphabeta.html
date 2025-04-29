@@ -1,0 +1,227 @@
+<html>
+
+<!--=======================================================================-->
+
+<head>
+  <title>saucetin_alphabeta</title>
+  <script type='text/javascript' src='http://epilog.stanford.edu/javascript/epilog.js'></script>
+  <script type='text/javascript' src='http://gamemaster.stanford.edu/javascript/localstorage.js'></script>
+  <script type='text/javascript' src='http://gamemaster.stanford.edu/interpreter/general.js'></script>
+  <script type='text/javascript'>
+//==============================================================================
+// The code below defines a basic legal player.
+// Steps to customize:
+// (1) Replace our definitions of ping, start, play, stop, abort with your code.
+// (2) Be sure to set the variable 'player' to your player's id.
+// (3) Also change the value in the 'Identifier' field in the HTML below.
+//==============================================================================
+
+// Description of strategy: We implemented a maximax player, along with memoization of states to make sure any duplicate calls of maximax 
+// on states are avoided. We noticed that our player could comfortably player whenever going second in any match but it could only play 
+// (not error in the first move) when playing 'tictactoe' when the playclock time was ~17 seconds.
+
+var manager = 'manager';
+var player = 'saucetin_alphabeta';
+
+var role = 'robot';
+var rules = [];
+var startclock = 10;
+var playclock = 10;
+
+var library = [];
+var roles = [];
+var state = [];
+
+// ▶️ Add this memo object at the top level
+var memo = {};
+
+//==============================================================================
+
+function ping (){
+  // console.log("🚀 ping()");
+  return 'ready';
+}
+
+function start(r, rs, sc, pc) {
+  // console.log("🚀 start()", r, rs.slice(0,2), sc, pc);
+  role = r;
+  rules = rs.slice(1);
+  startclock = numberize(sc);
+  playclock  = numberize(pc);
+  library    = definemorerules([], rules);
+  roles      = findroles(library);
+  state      = findinits(library);
+
+  // ▶️ Clear memo at the start of each game
+  memo = {};
+  return 'ready';
+}
+
+function play(move) {
+  if (move != null) state = simulate(move, state, library);
+  if (findcontrol(state, library) !== role) return false;
+  return bestmove(state);
+}
+
+function stop(move) { return false; }
+function abort()     { return false; }
+
+function bestmove(state) {
+  var actions    = findlegals(state, library);
+  var bestAction = actions[0];
+  var alpha      = Number.NEGATIVE_INFINITY;
+  var beta       = Number.POSITIVE_INFINITY;
+  var bestScore  = Number.NEGATIVE_INFINITY;
+
+  for (var i = 0; i < actions.length; i++) {
+    var s2    = simulate(actions[i], state, library);
+    var vec   = maximax(s2, alpha, beta);
+    var score = vec[role];
+    if (score > bestScore) {
+      bestScore  = score;
+      bestAction = actions[i];
+    }
+    alpha = Math.max(alpha, bestScore);
+    if (alpha >= beta) {
+      break;
+    }
+    if (bestScore === 100) {
+      return bestAction;
+    }
+  }
+
+  return bestAction;
+}
+
+function maximax(state, alpha, beta) {
+  var key = JSON.stringify(state);
+  if (memo[key]) {
+    return memo[key];
+  }
+  if (findterminalp(state, library)) {
+    var terminalVec = {};
+    for (var j = 0; j < roles.length; j++) {
+      terminalVec[roles[j]] = findreward(roles[j], state, library);
+    }
+    memo[key] = terminalVec;
+    return terminalVec;
+  }
+  var active = findcontrol(state, library);
+  var bestVec;
+  if (active === role) {
+    var bestVal = Number.NEGATIVE_INFINITY;
+    var actions = findlegals(state, library);
+    for (var i = 0; i < actions.length; i++) {
+      var s2      = simulate(actions[i], state, library);
+      var candVec = maximax(s2, alpha, beta);
+      var val     = candVec[active];
+      if (val > bestVal) {
+        bestVal = val;
+        bestVec = candVec;
+      }
+      alpha = Math.max(alpha, bestVal);
+      if (alpha >= beta) {
+        break;
+      }
+    }
+
+
+  } else {
+    var bestVal = Number.POSITIVE_INFINITY;
+    var actions = findlegals(state, library);
+    for (var i = 0; i < actions.length; i++) {
+      var s2      = simulate(actions[i], state, library);
+      var candVec = maximax(s2, alpha, beta);
+      var val     = candVec[active];
+      if (val < bestVal) {
+        bestVal = val;
+        bestVec = candVec;
+      }
+      beta = Math.min(beta, bestVal);
+      if (beta <= alpha) {
+        break;
+      }
+    }
+  }
+
+  memo[key] = bestVec;
+  return bestVec;
+}
+
+
+
+
+
+
+//==============================================================================
+// End of player code
+//==============================================================================
+  </script>
+</head>
+
+<!--=======================================================================-->
+
+<body bgcolor='#aabbbb' onload='doinitialize()'>
+  <center>
+    <table width='720' cellspacing='0' cellpadding='40' bgcolor='#ffffff'>
+      <tr>
+        <td>
+
+<!--=======================================================================-->
+
+<center>
+  <table width='640' cellpadding='0'>
+    <tr>
+      <td width='180' align='center' valign='center'>
+        <img width='130' src='http://gamemaster.stanford.edu/images/ggp.jpg'/>
+      </td>
+      <td align='center'>
+        <span style='font-size:18pt'>&nbsp;</span>
+        <span style='font-size:32pt'>Gamemaster</span><br/>
+      </td>
+      <td width='180' align='center' style='color:#000066;font-size:18px'>
+        <i>General<br/>Game<br/>Playing</i>
+      </td>
+    </tr>
+  </table>
+</center>
+
+<!--=======================================================================-->
+
+<br/>
+<table width='640' cellpadding='8' cellspacing='0' bgcolor='#f4f8f8' border='1'>
+  <tr height='40'>
+     <td align='center'>
+<table style='color:#000066;font-size:18px'>
+  <tr>
+    <td>
+Protocol: localstorage<br/>
+Metagamer: none<br/>
+Strategy: custom<br/>
+Identifier: <span id='player'>saucetin_alphabeta</span> <img src="http://gamemaster.stanford.edu/images/pencil.gif" onclick='doplayer()'/>
+    </td>
+  </tr>
+</table>
+    </td>
+  </tr>
+</table>
+<br/>
+
+<!--=======================================================================-->
+
+<center>
+  <br/>
+  <textarea id='transcript' style='font-family:courier' rows='30' cols='80' readonly></textarea>
+</center>
+
+<!--=======================================================================-->
+
+        </td>
+      </tr>
+    </table>
+  </center>
+</body>
+
+<!--=======================================================================-->
+
+</html>
