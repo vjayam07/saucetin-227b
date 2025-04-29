@@ -1,6 +1,6 @@
 <html>
   <head>
-    <title>saucetin_maximax_single</title>
+    <title>saucetin_minimax_single_iterative_deepening</title>
     <script
       type="text/javascript"
       src="http://epilog.stanford.edu/javascript/epilog.js"
@@ -125,7 +125,7 @@
 
       function minimax(state, depth, isMaximizing) {
         nodeCounter++;
-        
+
         const stateKey = JSON.stringify(state);
 
         // Use caching if you want (optional for bounded depth)
