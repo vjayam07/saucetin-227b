@@ -99,16 +99,17 @@
             const score = minimax(nextState, depth - 1, nextIsMaximizing);
 
             if (isMaximizing) {
-              if (score > bestScore) {
-                bestScore = score;
-                bestMove = move;
+              if (score > currentBestScore) {
+                currentBestScore = score;
+                currentBestMove = move;
               }
             } else {
-              if (score < bestScore) {
-                bestScore = score;
-                bestMove = move;
+              if (score < currentBestScore) {
+                currentBestScore = score;
+                currentBestMove = move;
               }
             }
+
             if (Date.now() - startTime > timeLimit || nodeCounter > nodeLimit) {
               break;
             }
@@ -116,6 +117,7 @@
 
           if (currentBestMove !== null) {
             bestMove = currentBestMove;
+            bestScore = currentBestScore;
           }
         }
         
