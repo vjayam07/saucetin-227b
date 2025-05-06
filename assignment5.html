@@ -28,14 +28,10 @@
         var roles = [];
         var state = [];
 
-        // State cache with depth tracking
-        var stateCache = {};
-        var maxDepth = 3; // Initial depth for iterative deepening
+        var timeBuffer = 500; // 5 seconds
 
-        var nodeCounter = 0;
-        var nodeLimit = 1000; // for example
-        var startTime = 0;
-        var timeLimit = 5000; // 5 seconds
+        function now()          { return Date.now(); }
+        function randint(n)     { return Math.floor(Math.random() * n); }
 
         //==============================================================================
 
@@ -57,7 +53,7 @@
         function play(move) {
             if (move !== nil) state = simulate(move, state, library);
             if (findcontrol(state, library) !== role) return false;
-            return playmcs(role);
+            return mcsMove();
         }
 
         function stop(move) {
@@ -67,61 +63,82 @@
             return false;
         }
 
-        function playmcs(role) {
-            var deadline = Date.now() + Math.floor(playclock - 2) * 1000;
-            var actions = shuffle(findlegals(state, library));
-            if (actions.length === 0) return false;
-            if (actions.length === 1) return actions[0];
+        // ================================================================
+        //   Basic Monte‑Carlo Search (flat)
+        // ================================================================
+        function mcsMove() {
+        var myMoves = legalMoves(state, role);
+        if (myMoves.length === 0) return false;
+        if (myMoves.length === 1) return myMoves[0];
 
-            var states = [];
-            var scores = [];
-            var visits = [];
+        var scores = new Array(myMoves.length).fill(0);
+        var visits = new Array(myMoves.length).fill(0);
 
-            for (var i = 0; i < actions.length; i++) {
-            states[i] = simulate(actions[i], state, library);
-            scores[i] = 0;
-            visits[i] = 0;
-            }
+        var deadline = now() + playclock * 1000 - timeBuffer; 
+        var idx = 0;
 
-            explore(states, scores, visits, deadline);
-            return selectaction(actions, scores, visits);
+        
+        while (now() < deadline) {
+            if (idx >= myMoves.length) idx = 0;          // simple round‑robin
+
+            var joint  = randomJointMove(state, myMoves[idx]);
+            var nextSt = simulate(joint, state, library);
+            var score  = rollout(nextSt);
+
+            scores[idx] += score;
+            visits[idx] += 1;
+            idx += 1;
         }
 
-        function explore(states, scores, visits, deadline) {
-            var index = 0;
-            while (Date.now() < deadline) {
-            if (index >= states.length) index = 0;
-            var result = depthcharge(states[index]);
-            scores[index] += result;
-            visits[index] += 1;
-            index++;
-            }
-            return true;
+        // select highest average reward
+        var best = myMoves[0], bestAvg = visits[0] ? scores[0] / visits[0] : -1;
+        for (var i = 1; i < myMoves.length; i++) {
+            var avg = visits[i] ? scores[i] / visits[i] : -1;
+            if (avg > bestAvg) { bestAvg = avg; best = myMoves[i]; }
+        }
+        return best;
         }
 
-        function depthcharge(state) {
-            if (findterminalp(state, library)) {
-            return findreward(role, state, library) * 1;
-            }
-            var actions = findlegals(state, library);
-            if (actions.length === 0) return 0;
-            var best = Math.floor(Math.random() * actions.length);
-            var newstate = simulate(actions[best], state, library);
-            return depthcharge(newstate);
+        // ------------------------------------------------
+        // Helpers
+        // ------------------------------------------------
+        function legalMoves(st, r) {
+        // Many GGP helpers assume global 'role'; temporarily switch.
+        var old = role;
+        role = r;
+        var moves = findlegals(st, library);
+        role = old;
+        return moves;
         }
 
-        function selectaction(actions, scores, visits) {
-            var action = actions[0];
-            var score = -1;
-            for (var i = 0; i < actions.length; i++) {
-            var newscore = Math.round(scores[i] / visits[i]);
-            if (newscore === 100) return actions[i];
-            if (newscore > score) {
-                action = actions[i];
-                score = newscore;
+        function randomJointMove(st, myMove) {
+        var joint = [];
+        for (var i = 0; i < roles.length; i++) {
+            var r = roles[i];
+            if (r === role) {
+            joint.push(myMove);
+            } else {
+            var opMoves = legalMoves(st, r);
+            joint.push(opMoves[randint(opMoves.length)]);
             }
+        }
+        return joint;
+        }
+
+        function rollout(st) {
+            var cur = st;
+            var steps = 0;
+            var MAX_STEPS = 200; // prevent runaway playouts
+            while (!findterminalp(cur, library) && steps < MAX_STEPS) {
+                var joint = [];
+                for (var i = 0; i < roles.length; i++) {
+                    var potential_moves = legalMoves(cur, roles[i])
+                    joint.push(potential_moves[randint(potential_moves.length)]);
+                }
+                cur = simulate(joint, cur, library);
+                steps += 1;
             }
-            return action;
+            return findterminalp(cur, library) ? findreward(role, cur, library) : 0;
         }
     </script>
 </head>
