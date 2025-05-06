@@ -79,7 +79,7 @@
 
         
         while (now() < deadline) {
-            if (idx >= myMoves.length) idx = 0;          // simple round‑robin
+            if (idx >= myMoves.length) idx = 0;
 
             var joint  = randomJointMove(state, myMoves[idx]);
             var nextSt = simulate(joint, state, library);
@@ -128,7 +128,7 @@
         function rollout(st) {
             var cur = st;
             var steps = 0;
-            var MAX_STEPS = 200; // prevent runaway playouts
+            var MAX_STEPS = 200;
             while (!findterminalp(cur, library) && steps < MAX_STEPS) {
                 var joint = [];
                 for (var i = 0; i < roles.length; i++) {
