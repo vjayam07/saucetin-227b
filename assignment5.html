@@ -1,5 +1,5 @@
 <html>
-  <!--
+<!--
   Monte Carlo Search Implementation: Comprehensive Analysis
   =======================================================
 
@@ -44,231 +44,204 @@
   The flat MCS approach provides a robust foundation for game playing that can be extended with more sophisticated techniques in the future.
   -->
 
-  <head>
+<head>
     <title>saucetin</title>
-    <script
-      type="text/javascript"
-      src="http://epilog.stanford.edu/javascript/epilog.js"
-    ></script>
-    <script
-      type="text/javascript"
-      src="http://gamemaster.stanford.edu/javascript/localstorage.js"
-    ></script>
-    <script
-      type="text/javascript"
-      src="http://gamemaster.stanford.edu/interpreter/general.js"
-    ></script>
+    <script type="text/javascript" src="http://epilog.stanford.edu/javascript/epilog.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/javascript/localstorage.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/interpreter/general.js"></script>
     <script type="text/javascript">
-      //==============================================================================
-      // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
-      //==============================================================================
+        //==============================================================================
+        // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
+        //==============================================================================
 
-      var manager = "manager";
-      var player = "saucetin";
+        var manager = "manager";
+        var player = "saucetin";
 
-      var role = "robot";
-      var rules = [];
-      var startclock = 10;
-      var playclock = 10;
+        var role = "robot";
+        var rules = [];
+        var startclock = 10;
+        var playclock = 10;
 
-      var library = [];
-      var roles = [];
-      var state = [];
+        var library = [];
+        var roles = [];
+        var state = [];
 
-      var timeBuffer = 500; // 5 seconds
+        var timeBuffer = 1000; // 1 second
 
-      function now() {
-        return Date.now();
-      }
-      function randint(n) {
-        return Math.floor(Math.random() * n);
-      }
-
-      //==============================================================================
-
-      function ping() {
-        return "ready";
-      }
-
-      function start(r, rs, sc, pc) {
-        role = r;
-        rules = rs.slice(1);
-        startclock = numberize(sc);
-        playclock = numberize(pc);
-        library = definemorerules([], rules);
-        roles = findroles(library);
-        state = findinits(library);
-        return "ready";
-      }
-
-      function play(move) {
-        if (move !== nil) state = simulate(move, state, library);
-        if (findcontrol(state, library) !== role) return false;
-        return mcsMove();
-      }
-
-      function stop(move) {
-        return false;
-      }
-      function abort() {
-        return false;
-      }
-
-      // ================================================================
-      //   Basic Monte‑Carlo Search (flat)
-      // ================================================================
-      function mcsMove() {
-        var myMoves = legalMoves(state, role);
-        if (myMoves.length === 0) return false;
-        if (myMoves.length === 1) return myMoves[0];
-
-        var scores = new Array(myMoves.length).fill(0);
-        var visits = new Array(myMoves.length).fill(0);
-
-        var deadline = now() + playclock * 1000 - timeBuffer;
-        var idx = 0;
-
-        while (now() < deadline) {
-          if (idx >= myMoves.length) idx = 0;
-
-          var joint = randomJointMove(state, myMoves[idx]);
-          var nextSt = simulate(joint, state, library);
-          var score = rollout(nextSt);
-
-          scores[idx] += score;
-          visits[idx] += 1;
-          idx += 1;
+        function now() {
+            return Date.now();
+        }
+        function randint(n) {
+            return Math.floor(Math.random() * n);
         }
 
-        // select highest average reward
-        var best = myMoves[0],
-          bestAvg = visits[0] ? scores[0] / visits[0] : -1;
-        for (var i = 1; i < myMoves.length; i++) {
-          var avg = visits[i] ? scores[i] / visits[i] : -1;
-          if (avg > bestAvg) {
-            bestAvg = avg;
-            best = myMoves[i];
-          }
-        }
-        return best;
-      }
+        //==============================================================================
 
-      // ------------------------------------------------
-      // Helpers
-      // ------------------------------------------------
-      function legalMoves(st, r) {
-        // Many GGP helpers assume global 'role'; temporarily switch.
-        var old = role;
-        role = r;
-        var moves = findlegals(st, library);
-        role = old;
-        return moves;
-      }
-
-      function randomJointMove(st, myMove) {
-        var joint = [];
-        for (var i = 0; i < roles.length; i++) {
-          var r = roles[i];
-          if (r === role) {
-            joint.push(myMove);
-          } else {
-            var opMoves = legalMoves(st, r);
-            joint.push(opMoves[randint(opMoves.length)]);
-          }
+        function ping() {
+            return "ready";
         }
-        return joint;
-      }
 
-      function rollout(st) {
-        var cur = st;
-        var steps = 0;
-        var MAX_STEPS = 200;
-        while (!findterminalp(cur, library) && steps < MAX_STEPS) {
-          var joint = [];
-          for (var i = 0; i < roles.length; i++) {
-            var potential_moves = legalMoves(cur, roles[i]);
-            joint.push(potential_moves[randint(potential_moves.length)]);
-          }
-          cur = simulate(joint, cur, library);
-          steps += 1;
+        function start(r, rs, sc, pc) {
+            role = r;
+            rules = rs.slice(1);
+            startclock = numberize(sc);
+            playclock = numberize(pc);
+            library = definemorerules([], rules);
+            roles = findroles(library);
+            state = findinits(library);
+            return "ready";
         }
-        return findterminalp(cur, library) ? findreward(role, cur, library) : 0;
-      }
+
+        function play(move) {
+            if (move !== nil) state = simulate(move, state, library);
+            if (findcontrol(state, library) !== role) return false;
+            var best = mcsMove(); 
+            console.log("returning move", "(" + best.join(" ") + ")")
+            return "(" + best.join(" ") + ")";
+        }
+
+        function stop(move) {
+            return false;
+        }
+        function abort() {
+            return false;
+        }
+
+        // ================================================================
+        //   Basic Monte‑Carlo Search (flat)
+        // ================================================================
+        function mcsMove() {
+            var myMoves = findlegals(state, library);
+            //console.log("myMoves", myMoves, legalMoves(state, role))
+            var n = myMoves.length;
+            if (n === 0) return false;
+            if (n === 1) return myMoves[0];
+
+            var scores = new Array(n).fill(0);
+            var visits = new Array(n).fill(0);
+
+            var deadline = now() + playclock * 1000 - 5000; // 0.5‑s guard
+            var idx = 0;
+
+            var bestMove = myMoves[0];
+            var bestAvg = -Infinity;
+
+            while (now() < deadline) {
+                if (idx >= n) idx = 0; // round‑robin root actions
+
+                var joint = randomJointMove(state, myMoves[idx]);
+                var nextSt = simulate(joint, state, library);
+                var score = rollout(nextSt);
+
+                scores[idx] += score;
+                visits[idx] += 1;
+
+                var avg = scores[idx] / visits[idx];
+                if (avg > bestAvg) {
+                    bestAvg = avg;
+                    bestMove = myMoves[idx];
+                }
+                idx += 1;
+            }
+            return bestMove; // already up‑to‑date – no post loop work needed
+        }
+
+        // ------------------------------------------------
+        // Helpers
+        // ------------------------------------------------
+        function legalMoves(st, r) {
+            var old = role;
+            role = r;
+            var moves = findlegals(st, library);
+            role = old;
+            return moves;
+        }
+
+        function randomJointMove(st, myMove) {
+            var joint = [];
+            for (var i = 0; i < roles.length; i++) {
+                var r = roles[i];
+                if (r === role) {
+                    joint.push(myMove);
+                } else {
+                    var opMoves = legalMoves(st, r);
+                    joint.push(opMoves[randint(opMoves.length)]);
+                }
+            }
+            return joint;
+        }
+
+        function rollout(st) {
+            var cur = st;
+            var steps = 0;
+            var MAX_STEPS = 100;
+            console.log("starting rollout")
+            while (!findterminalp(cur, library) && steps < MAX_STEPS) {
+                var joint = [];
+                for (var i = 0; i < roles.length; i++) {
+                    var potential_moves = legalMoves(cur, roles[i]);
+                    joint.push(potential_moves[randint(potential_moves.length)]);
+                }
+                cur = simulate(joint, cur, library);
+                steps += 1;
+            }
+            return findterminalp(cur, library) ? findreward(role, cur, library) : 0;
+        }
     </script>
-  </head>
+</head>
 
-  <body bgcolor="#aabbbb" onload="doinitialize()">
+<body bgcolor="#aabbbb" onload="doinitialize()">
     <center>
-      <table width="720" cellspacing="0" cellpadding="40" bgcolor="#ffffff">
-        <tr>
-          <td>
-            <center>
-              <table width="640" cellpadding="0">
-                <tr>
-                  <td width="180" align="center" valign="center">
-                    <img
-                      width="130"
-                      src="http://gamemaster.stanford.edu/images/ggp.jpg"
-                    />
-                  </td>
-                  <td align="center">
-                    <span style="font-size: 18pt">&nbsp;</span>
-                    <span style="font-size: 32pt">Gamemaster</span><br />
-                  </td>
-                  <td
-                    width="180"
-                    align="center"
-                    style="color: #000066; font-size: 18px"
-                  >
-                    <i>General<br />Game<br />Playing</i>
-                  </td>
-                </tr>
-              </table>
-            </center>
+        <table width="720" cellspacing="0" cellpadding="40" bgcolor="#ffffff">
+            <tr>
+                <td>
+                    <center>
+                        <table width="640" cellpadding="0">
+                            <tr>
+                                <td width="180" align="center" valign="center">
+                                    <img width="130" src="http://gamemaster.stanford.edu/images/ggp.jpg" />
+                                </td>
+                                <td align="center">
+                                    <span style="font-size: 18pt">&nbsp;</span>
+                                    <span style="font-size: 32pt">Gamemaster</span><br />
+                                </td>
+                                <td width="180" align="center" style="color: #000066; font-size: 18px">
+                                    <i>General<br />Game<br />Playing</i>
+                                </td>
+                            </tr>
+                        </table>
+                    </center>
 
-            <br />
-            <table
-              width="640"
-              cellpadding="8"
-              cellspacing="0"
-              bgcolor="#f4f8f8"
-              border="1"
-            >
-              <tr height="40">
-                <td align="center">
-                  <table style="color: #000066; font-size: 18px">
-                    <tr>
-                      <td>
-                        Protocol: localstorage<br />
-                        Metagamer: none<br />
-                        Strategy: alpha-beta with iterative deepening<br />
-                        Identifier:
-                        <span id="player">saucetin</span>
-                        <img
-                          src="http://gamemaster.stanford.edu/images/pencil.gif"
-                          onclick="doplayer()"
-                        />
-                      </td>
-                    </tr>
-                  </table>
+                    <br />
+                    <table width="640" cellpadding="8" cellspacing="0" bgcolor="#f4f8f8" border="1">
+                        <tr height="40">
+                            <td align="center">
+                                <table style="color: #000066; font-size: 18px">
+                                    <tr>
+                                        <td>
+                                            Protocol: localstorage<br />
+                                            Metagamer: none<br />
+                                            Strategy: alpha-beta with iterative deepening<br />
+                                            Identifier:
+                                            <span id="player">saucetin</span>
+                                            <img src="http://gamemaster.stanford.edu/images/pencil.gif"
+                                                onclick="doplayer()" />
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                    <br />
+
+                    <center>
+                        <br />
+                        <textarea id="transcript" style="font-family: courier" rows="30" cols="80" readonly></textarea>
+                    </center>
                 </td>
-              </tr>
-            </table>
-            <br />
-
-            <center>
-              <br />
-              <textarea
-                id="transcript"
-                style="font-family: courier"
-                rows="30"
-                cols="80"
-                readonly
-              ></textarea>
-            </center>
-          </td>
-        </tr>
-      </table>
+            </tr>
+        </table>
     </center>
-  </body>
+</body>
+
 </html>
