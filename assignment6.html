@@ -67,6 +67,19 @@
         var state = [];
 
         var timeBuffer = 1000; // 1 second
+        
+        // Add global variables to store MCS statistics across calls
+        var globalScores = [];
+        var globalVisits = [];
+        var precomputedMoves = [];
+
+        // Global counters for rollout statistics
+        var totalRollouts = 0;
+        var terminalRollouts = 0;
+        var nonzeroRewardRollouts = 0;
+        var maxSteps = 0;
+
+        //==============================================================================
 
         function now() {
             return Date.now();
@@ -89,15 +102,90 @@
             library = definemorerules([], rules);
             roles = findroles(library);
             state = findinits(library);
+            
+            console.log("START: Role=" + role + ", Startclock=" + startclock + ", Playclock=" + playclock);
+            
+            // Implement Headstart strategy: use startclock time to precompute move values
+            var myMoves = findlegals(state, library);
+            precomputedMoves = myMoves.slice(); // Store for later use
+            var n = myMoves.length;
+            
+            console.log("Legal moves count: " + n);
+            
+            // Initialize the statistics arrays
+            globalScores = new Array(n).fill(0);
+            globalVisits = new Array(n).fill(0);
+            
+            // If only one move is available, no need for precomputation
+            if (n > 1) {
+                var deadline = now() + startclock * 1000 - timeBuffer;
+                var idx = 0;
+                var totalSimulations = 0;
+                
+                console.log("Starting precomputation during startclock...");
+                
+                // Perform simulations until deadline
+                while (now() < deadline) {
+                    if (idx >= n) idx = 0; // round-robin root actions
+                    
+                    var joint = randomJointMove(state, myMoves[idx]);
+                    var nextSt = simulate(joint, state, library);
+                    var score = rollout(nextSt);
+                    
+                    globalScores[idx] += score;
+                    globalVisits[idx] += 1;
+                    totalSimulations++;
+                    
+                    idx += 1;
+                }
+                
+                // Summarize precomputation results
+                var bestPrecompIdx = -1;
+                var bestPrecompAvg = -Infinity;
+                var precompStats = [];
+                
+                for (var i = 0; i < n; i++) {
+                    if (globalVisits[i] > 0) {
+                        var avg = globalScores[i] / globalVisits[i];
+                        precompStats.push("Move " + i + ": avg=" + avg.toFixed(2) + " (" + globalVisits[i] + " visits)");
+                        
+                        if (avg > bestPrecompAvg) {
+                            bestPrecompAvg = avg;
+                            bestPrecompIdx = i;
+                        }
+                    }
+                }
+                
+                console.log("Precomputation complete: " + totalSimulations + " total simulations");
+                console.log("Move stats: " + precompStats.join(", "));
+                if (bestPrecompIdx >= 0) {
+                    console.log("Best precomputed move: " + bestPrecompIdx + " with avg " + bestPrecompAvg.toFixed(2));
+                }
+            }
+            
+            // Reset statistics
+            totalRollouts = 0;
+            terminalRollouts = 0;
+            nonzeroRewardRollouts = 0;
+            maxSteps = 0;
+            
             return "ready";
         }
 
         function play(move) {
-            if (move !== nil) state = simulate(move, state, library);
-            if (findcontrol(state, library) !== role) return false;
+            if (move !== nil) {
+                state = simulate(move, state, library);
+                console.log("Simulated opponent's move");
+            }
+            
+            var isMyTurn = findcontrol(state, library) === role;
+            console.log("Is my turn: " + isMyTurn);
+            
+            if (!isMyTurn) return false;
+            
             var best = mcsMove(); 
-            var formatted = "move(" + best.slice(1).join(",") + ")"
-            console.log("returning move", formatted)
+            var formatted = "move(" + best.slice(1).join(",") + ")";
+            console.log("Selected move: " + formatted);
             return formatted;
         }
 
@@ -112,21 +200,61 @@
         //   Basic Monte‑Carlo Search (flat)
         // ================================================================
         function mcsMove() {
+            console.log("MCS MOVE: Finding best move...");
+            
             var myMoves = findlegals(state, library);
-            //console.log("myMoves", myMoves, legalMoves(state, role))
             var n = myMoves.length;
+            console.log("Legal moves: " + n);
+            
             if (n === 0) return false;
             if (n === 1) return myMoves[0];
 
-            var scores = new Array(n).fill(0);
-            var visits = new Array(n).fill(0);
+            var scores = [];
+            var visits = [];
+            
+            // Initialize with precomputed values when available, or start fresh if not
+            var usingPrecomputed = false;
+            if (precomputedMoves.length > 0 && arraysEqual(precomputedMoves, myMoves)) {
+                // Use the precomputed values from startclock
+                scores = globalScores.slice();
+                visits = globalVisits.slice();
+                usingPrecomputed = true;
+                console.log("USING precomputed values (" + 
+                           visits.reduce((a, b) => a + b, 0) + " total precomputed visits)");
+            } else {
+                // Reset for a fresh search
+                scores = new Array(n).fill(0);
+                visits = new Array(n).fill(0);
+                console.log("NOT using precomputed values");
+            }
 
             var deadline = now() + playclock * 1000 - 500; // 0.5‑s guard
             var idx = 0;
 
             var bestMove = myMoves[0];
-            var bestAvg = -Infinity;
+            var bestAvg = scores[0] / Math.max(visits[0], 1);
+            var bestMoves = [0]; // Track indices of moves with the best score
 
+            // Update best move based on precomputed values
+            if (usingPrecomputed) {
+                bestMoves = []; // Reset best moves list
+                for (var i = 0; i < n; i++) {
+                    if (visits[i] > 0) {
+                        var avg = scores[i] / visits[i];
+                        if (avg > bestAvg) {
+                            bestAvg = avg;
+                            bestMove = myMoves[i];
+                            bestMoves = [i]; // New best move, clear previous ties
+                        } else if (avg === bestAvg) {
+                            bestMoves.push(i); // Tied for best, add to list
+                        }
+                    }
+                }
+            }
+
+            var totalSimulations = 0;
+            console.log("Starting play-time MCS simulations...");
+            
             while (now() < deadline) {
                 if (idx >= n) idx = 0; // round‑robin root actions
 
@@ -136,47 +264,66 @@
 
                 scores[idx] += score;
                 visits[idx] += 1;
+                totalSimulations++;
 
                 var avg = scores[idx] / visits[idx];
                 if (avg > bestAvg) {
                     bestAvg = avg;
                     bestMove = myMoves[idx];
+                    bestMoves = [idx]; // New best move, clear previous ties
+                } else if (avg === bestAvg && !bestMoves.includes(idx)) {
+                    bestMoves.push(idx); // Add to tied moves if not already there
                 }
                 idx += 1;
             }
-            return bestMove; // already up‑to‑date – no post loop work needed
-        }
-
-        // ------------------------------------------------
-        // Helpers
-        // ------------------------------------------------
-        function legalMoves(st, r) {
-            var old = role;
-            role = r;
-            var moves = findlegals(st, library);
-            role = old;
-            return moves;
-        }
-
-        function randomJointMove(st, myMove) {
-            var joint = [];
-            for (var i = 0; i < roles.length; i++) {
-                var r = roles[i];
-                if (r === role) {
-                    joint.push(myMove);
-                } else {
-                    var opMoves = legalMoves(st, r);
-                    joint.push(opMoves[randint(opMoves.length)]);
+            
+            // Store the updated statistics for potential future use
+            globalScores = scores.slice();
+            globalVisits = visits.slice();
+            precomputedMoves = myMoves.slice();
+            
+            // Summarize results
+            var moveStats = [];
+            for (var i = 0; i < n; i++) {
+                if (visits[i] > 0) {
+                    moveStats.push("Move " + i + ": avg=" + (scores[i] / visits[i]).toFixed(2) + 
+                                  " (" + visits[i] + " visits)");
                 }
             }
-            return joint;
+            
+            console.log("Completed " + totalSimulations + " new simulations during play");
+            console.log("Move stats: " + moveStats.join(", "));
+            
+            // If all moves have same score, randomly select from the best moves
+            if (bestMoves.length > 1) {
+                var randomIndex = randint(bestMoves.length);
+                var selectedIdx = bestMoves[randomIndex];
+                bestMove = myMoves[selectedIdx];
+                console.log("TIE DETECTED - randomly selected move idx: " + selectedIdx + 
+                  " from " + bestMoves.length + " tied moves with score " + bestAvg.toFixed(2));
+            } else {
+                console.log("SELECTED move idx: " + myMoves.indexOf(bestMove) + 
+                  " with avg score " + bestAvg.toFixed(2));
+            }
+            
+            // Log summary statistics at the end
+            console.log("ROLLOUT STATS: total=" + totalRollouts + 
+               ", reached_terminal=" + terminalRollouts + 
+               " (" + Math.round(terminalRollouts/totalRollouts*100) + "%)" +
+               ", nonzero_rewards=" + nonzeroRewardRollouts +
+               " (" + Math.round(nonzeroRewardRollouts/totalRollouts*100) + "%)" +
+               ", max_steps=" + maxSteps);
+            
+            return bestMove;
         }
 
         function rollout(st) {
             var cur = st;
             var steps = 0;
-            var MAX_STEPS = 100;
-            console.log("starting rollout")
+            var MAX_STEPS = 300;
+            
+            totalRollouts++;
+            
             while (!findterminalp(cur, library) && steps < MAX_STEPS) {
                 var joint = [];
                 for (var i = 0; i < roles.length; i++) {
@@ -186,7 +333,44 @@
                 cur = simulate(joint, cur, library);
                 steps += 1;
             }
-            return findterminalp(cur, library) ? findreward(role, cur, library) : 0;
+            
+            if (steps > maxSteps) maxSteps = steps;
+            
+            var isTerminal = findterminalp(cur, library);
+            if (isTerminal) terminalRollouts++;
+            
+            var result = isTerminal ? findreward(role, cur, library) : 0;
+            if (result !== 0) nonzeroRewardRollouts++;
+            
+            // Extra debug for non-zero rewards (important to understand scoring)
+            if (result !== 0 && Math.random() < 0.1) {  // Log 10% of non-zero rewards
+                console.log("NON-ZERO REWARD: " + result + " after " + steps + " steps");
+            }
+            
+            // Log diagnostic info every 100 rollouts to avoid flooding
+            if (Math.random() < 0.01) {  // Sample approximately 1% of rollouts
+                console.log("ROLLOUT DIAG: terminal=" + isTerminal + 
+                   ", steps=" + steps + 
+                   ", hit_limit=" + (steps >= MAX_STEPS) + 
+                   ", reward=" + result);
+                
+                if (isTerminal && result !== 0) {
+                    console.log("NON-ZERO REWARD FOUND: " + result);
+                }
+            }
+            
+            return result;
+        }
+
+        // Helper function to compare arrays (for checking if precomputed moves match current legal moves)
+        function arraysEqual(a, b) {
+            if (a.length !== b.length) return false;
+            
+            for (var i = 0; i < a.length; i++) {
+                if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false;
+            }
+            
+            return true;
         }
     </script>
 </head>
