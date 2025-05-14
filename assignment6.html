@@ -3,10 +3,14 @@
   Monte Carlo Search Implementation: Comprehensive Analysis
   =======================================================
 
-  Reflection:
+  Reflection/Commentary:
   ----------
-  For Assignment 5, we implemented a Monte Carlo Search (MCS) player that uses a flat approach to game playing. This implementation focuses on sampling and simulation to make decisions. The key insight behind this approach is that by running many random simulations from a given state, we can estimate the value of different moves without needing to build an explicit game tree.
-
+  For Assignment 5, we implemented a Monte Carlo Search (MCS) player that uses a flat approach to game playing. This implementation focuses on sampling and simulation to make decisions. The key insight behind this approach is that by running many random simulations from a given state, we can estimate the value of different moves without needing to build an explicit game tree. For this assignment, our group created an MCS player  that picks moves using Monte Carlo Search. The idea is that the player goes through attempts of trying out lots of random games at each step (from all possible moves), and then chooses the optimal decision. Our player utilizes a strategy where it runs simulations ahead of time through our initial start time implementation. This allows the algorithm to overall pick moves quicker in the long run. We do also have a deadline on when it must make a decision by to ensure that it doesn’t time out. 
+  Our strategy also keeps track of each move's performance during these simulations where it uses metrics such as  the total scores and number of simulations done to then calculate and see which move looks best. If some of these evaluations are equal then it picks randomly
+  We also explored a Bigswitch strategy where we focused on quickly switching between different simulation methods depending on specific factors to  optimize how the player performed.
+  Our players after testing seems to work pretty well across different types of games. Overall, this straightforward Monte Carlo method sets up a solid base for general game playing and could be improved further down the line.
+  
+  
   Core Algorithm Structure:
   ----------------------
   Our implementation uses a flat Monte Carlo Search approach, which means we evaluate moves by performing random rollouts from each possible move. For each move, we maintain two key statistics: the total score accumulated across all simulations and the number of times we've visited that move. This allows us to calculate an average score for each move, which we use to make our final selection.
