@@ -241,26 +241,35 @@
 
         function play(move) {
             if (move !== nil) {
-                console.log("Updating game state with move:", move);
                 try {
-                    // Handle different move formats based on game type
                     var moveToSimulate = move;
                     
-                    // For multi-player games, convert string format to array if needed
-                    if (roles.length > 1 && typeof move === 'string' && move.startsWith('move(') && move.includes(',')) {
-                        var parts = move.substring(5, move.length - 1).split(',').map(Number);
-                        moveToSimulate = ['move'].concat(parts);
+                    // Handle string format conversion for simulation
+                    if (typeof move === 'string') {
+                        // Check if it's in action(params) format
+                        var actionMatch = move.match(/^([a-z]+)\((.*)\)$/);
+                        if (actionMatch) {
+                            var actionType = actionMatch[1];
+                            var params = actionMatch[2].split(',');
+                            
+                            // Convert params to numbers if they're numeric
+                            params = params.map(p => /^\d+$/.test(p) ? Number(p) : p);
+                            
+                            // Create the array format: [actionType, param1, param2, ...]
+                            moveToSimulate = [actionType].concat(params);
+                        }
                     }
                     
                     state = simulate(moveToSimulate, state, library);
                 } catch (e) {
-                    console.error("State update failed:", e.message);
+                    console.error("State update failed");
                 }
             }
             
-            var isMyTurn = findcontrol(state, library) === role;
-            if (!isMyTurn) return false;
+            // Check if it's our turn
+            if (findcontrol(state, library) !== role) return false;
             
+            // Get legal moves and select best one
             var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
             var best;
             
@@ -272,33 +281,34 @@
                 best = mcsMove(myMoves);
             }
             
-            // Format the move for game communication
-            var formatted;
-            
-            // Multi-player games with coordinate moves
+            // Format move for communication based on game type
             if (roles.length > 1) {
+                // Multi-player: return in action(params) format
                 if (Array.isArray(best)) {
-                    formatted = best[0] + "(" + best.slice(1).join(",") + ")";
+                    return best[0] + "(" + best.slice(1).join(",") + ")";
                 } else {
-                    formatted = best;
+                    return best; // Already formatted or special move
                 }
-            } 
-            // Single-player games
-            else {
+            } else {
+                // Single-player: also return in action(params) format
                 if (Array.isArray(best)) {
-                    formatted = "move(" + best.slice(1).join(",") + ")";
-                } else if (typeof best === 'string') {
-                    if (best.includes('(') && best.includes(')')) {
-                        formatted = best;
+                    if (best.length >= 2) {
+                        // Return "move(h)" format for ['move', 'h']
+                        return best[0] + "(" + best[1] + ")";
                     } else {
-                        formatted = "move(" + best + ")";
+                        return best[0] + "()"; // Empty params as fallback
                     }
                 } else {
-                    formatted = "move(" + best + ")";
+                    // If already a string, ensure it's in the right format
+                    var match = String(best).match(/^([a-z]+)\((.*)\)$/);
+                    if (match) {
+                        return best; // Already in the right format
+                    } else {
+                        // Add the formatting if it's just a raw value
+                        return "move(" + best + ")";
+                    }
                 }
             }
-            
-            return formatted;
         }
 
         function randomJointMove(state, myMove) {
@@ -356,7 +366,7 @@
                 console.log("NOT using precomputed values");
             }
 
-            var deadline = now() + playclock * 1000 - timeBuffer; // 0.5‑s guard
+            var deadline = now() + playclock * 1000 - timeBuffer;
             var idx = 0;
 
             var bestMove = myMoves[0];
