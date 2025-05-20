@@ -70,7 +70,7 @@
         var state = [];
         var startclock = 10;
         var playclock = 10;
-        var timeBuffer = 500; // ms
+        var timeBuffer = 3000; // ms
         var precomputedMoves = [];
         var globalScores = [];
         var globalVisits = [];
@@ -219,65 +219,52 @@
         }
 
         /**
-         * Find legal moves for a specific role using multiple methods to ensure robustness
+         * Find legal moves for a specific role
          */
         function findLegalMovesForRole(role, currentState, library, isGrounded) {
-            console.log("********** LEGAL MOVE DEBUGGING **********");
             console.log("Finding legal moves for role: " + role);
             
-            // Get legal moves using the now-working findlegals method
-            var legalMoves = [];
             var rawFindLegals = findlegals(currentState, library);
-            console.log("Raw findlegals result:", rawFindLegals);
+            var legalMoves = [];
             
-            // Based on the logs, rawFindLegals contains the moves directly
-            // Each element in rawFindLegals is already a legal move for the role
-            if (rawFindLegals && rawFindLegals.length > 0) {
+            if (rawFindLegals && Array.isArray(rawFindLegals)) {
                 for (var i = 0; i < rawFindLegals.length; i++) {
-                    var legal = rawFindLegals[i];
-                    if (Array.isArray(legal) && legal.length > 1 && legal[1] !== undefined) {
-                        legalMoves.push(legal[1]);
+                    if (Array.isArray(rawFindLegals[i])) {
+                        legalMoves.push(rawFindLegals[i]);
                     }
                 }
             }
             
-            console.log("Final moves: " + legalMoves.length + " legal moves found:", legalMoves);
-            console.log("********** END LEGAL MOVE DEBUGGING **********");
-            
+            console.log("Legal moves found: " + legalMoves.length);
             return legalMoves;
         }
 
         function play(move) {
             if (move !== nil) {
-                console.log("Simulating opponent's move:", move);
+                console.log("Updating game state with move:", move);
                 try {
-                    state = simulate(move, state, library);
-                    console.log("Simulation successful");
+                    // Handle different move formats based on game type
+                    var moveToSimulate = move;
+                    
+                    // For multi-player games, convert string format to array if needed
+                    if (roles.length > 1 && typeof move === 'string' && move.startsWith('move(') && move.includes(',')) {
+                        var parts = move.substring(5, move.length - 1).split(',').map(Number);
+                        moveToSimulate = ['move'].concat(parts);
+                    }
+                    
+                    state = simulate(moveToSimulate, state, library);
                 } catch (e) {
-                    console.error("Simulation failed:", e);
-                    console.error("This suggests our state tracking is out of sync with the game manager");
-                }
-                
-                // Log the new state after simulation
-                console.log("STATE AFTER SIMULATION:");
-                for (var i = 0; i < Math.min(state.length, 10); i++) {
-                    console.log(" - " + stringify(state[i]));
-                }
-                if (state.length > 10) {
-                    console.log(" - ... and " + (state.length - 10) + " more items");
+                    console.error("State update failed:", e.message);
                 }
             }
             
             var isMyTurn = findcontrol(state, library) === role;
-            console.log("Is my turn: " + isMyTurn);
-            
             if (!isMyTurn) return false;
             
             var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
             var best;
             
             if (myMoves.length === 0) {
-                console.error("No legal moves found in play! Using noop");
                 best = "noop";
             } else if (myMoves.length === 1) {
                 best = myMoves[0];
@@ -285,68 +272,55 @@
                 best = mcsMove(myMoves);
             }
             
-            console.log("Raw move returned: ", best);
-            
-            // Format the move correctly for game communication
+            // Format the move for game communication
             var formatted;
-            if (Array.isArray(best)) {
-                // Handle array format (uncommon)
-                formatted = "move(" + best.slice(1).join(",") + ")";
-            } else if (typeof best === 'string') {
-                // Check if it's a single letter/value that needs formatting
-                if (best.length === 1 || !best.startsWith('move(')) {
-                    // Based on the game logs, format expected is move(x)
-                    formatted = "move(" + best + ")";
+            
+            // Multi-player games with coordinate moves
+            if (roles.length > 1) {
+                if (Array.isArray(best)) {
+                    formatted = best[0] + "(" + best.slice(1).join(",") + ")";
                 } else {
-                    // Already formatted correctly
                     formatted = best;
                 }
-            } else {
-                // Fallback default
-                formatted = best;
-            }
-            
-            // Final validation check to confirm move is legal
-            console.log("Validating final move: " + formatted);
-            try {
-                // Extract the action part for simulation
-                var actionForSim = formatted;
-                if (formatted.startsWith('move(') && formatted.endsWith(')')) {
-                    actionForSim = formatted.substring(5, formatted.length - 1);
-                }
-                
-                // Create a test joint move
-                var testJointMove = [];
-                for (var j = 0; j < roles.length; j++) {
-                    if (roles[j] === role) {
-                        testJointMove.push(actionForSim);
+            } 
+            // Single-player games
+            else {
+                if (Array.isArray(best)) {
+                    formatted = "move(" + best.slice(1).join(",") + ")";
+                } else if (typeof best === 'string') {
+                    if (best.includes('(') && best.includes(')')) {
+                        formatted = best;
                     } else {
-                        // For other roles, use noop
-                        testJointMove.push("noop");
+                        formatted = "move(" + best + ")";
                     }
-                }
-                
-                // Try to simulate the move
-                var nextState = simulate(testJointMove, state, library);
-                
-                if (!nextState || !Array.isArray(nextState)) {
-                    console.error("Final move validation failed! Fallback to noop");
-                    formatted = "move(noop)";
                 } else {
-                    console.log("Move passes final validation");
+                    formatted = "move(" + best + ")";
                 }
-            } catch (e) {
-                console.error("Move validation exception:", e);
-                console.error("Fallback to noop to avoid sending illegal move");
-                formatted = "move(noop)";
             }
             
-            console.log("Final selected move: " + formatted);
             return formatted;
         }
 
+        function randomJointMove(state, myMove) {
+            var joint = [];
+            for (var i = 0; i < roles.length; i++) {
+                if (roles[i] === role) {
+                    joint.push(myMove);
+                } else {
+                    var otherLegals = findLegalMovesForRole(roles[i], state, library, isGrounded);
+                    if (otherLegals.length === 0) {
+                        joint.push("noop");
+                    } else {
+                        var r = Math.floor(Math.random() * otherLegals.length);
+                        joint.push(otherLegals[r]);
+                    }
+                }
+            }
+            return joint;
+        }
+
         /**
-         * Find legal moves for a specific role using multiple methods to ensure robustness
+         * Find best move using Monte Carlo Search
          */
         function mcsMove(legalMoves) {
             console.log("MCS MOVE: Finding best move...");
@@ -382,7 +356,7 @@
                 console.log("NOT using precomputed values");
             }
 
-            var deadline = now() + playclock * 1000 - 500; // 0.5‑s guard
+            var deadline = now() + playclock * 1000 - timeBuffer; // 0.5‑s guard
             var idx = 0;
 
             var bestMove = myMoves[0];
@@ -469,45 +443,6 @@
                ", max_steps=" + maxSteps);
             
             return bestMove;
-        }
-
-        function randomJointMove(state, myMove) {
-            var joint = [];
-            for (var i = 0; i < roles.length; i++) {
-                if (roles[i] === role) {
-                    joint.push(myMove);
-                } else {
-                    // Get legal moves for this other role
-                    var otherMoves = [];
-                    if (isGrounded) {
-                        var moves = grounditems('legal', state, library);
-                        for (var j = 0; j < moves.length; j++) {
-                            var move = moves[j];
-                            if (Array.isArray(move) && move.length >= 2 && move[0] === roles[i]) {
-                                otherMoves.push(move[1]);
-                            }
-                        }
-                    } else {
-                        var allLegals = findlegals(state, library);
-                        for (var j = 0; j < allLegals.length; j++) {
-                            var move = allLegals[j];
-                            if (Array.isArray(move) && move[0] === 'legal' && move[1] === roles[i]) {
-                                otherMoves.push(move[2]);
-                            }
-                        }
-                    }
-                    
-                    if (otherMoves.length === 0) {
-                        console.error("No legal moves for role " + roles[i] + " in randomJointMove");
-                        joint.push("noop"); // Fallback
-                    } else {
-                        // If we're here, we have valid moves to choose from
-                        var r = Math.floor(Math.random() * otherMoves.length);
-                        joint.push(otherMoves[r]);
-                    }
-                }
-            }
-            return joint;
         }
 
         function rollout(st) {
