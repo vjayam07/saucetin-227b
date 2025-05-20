@@ -243,36 +243,25 @@
             if (move !== nil) {
                 try {
                     var moveToSimulate = move;
-                    
-                    // Handle string format conversion for simulation
                     if (typeof move === 'string') {
-                        // Check if it's in action(params) format
                         var actionMatch = move.match(/^([a-z]+)\((.*)\)$/);
                         if (actionMatch) {
                             var actionType = actionMatch[1];
                             var params = actionMatch[2].split(',');
-                            
-                            // Convert params to numbers if they're numeric
+                        
                             params = params.map(p => /^\d+$/.test(p) ? Number(p) : p);
-                            
-                            // Create the array format: [actionType, param1, param2, ...]
                             moveToSimulate = [actionType].concat(params);
                         }
                     }
-                    
                     state = simulate(moveToSimulate, state, library);
                 } catch (e) {
                     console.error("State update failed");
                 }
             }
             
-            // Check if it's our turn
             if (findcontrol(state, library) !== role) return false;
-            
-            // Get legal moves and select best one
             var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
             var best;
-            
             if (myMoves.length === 0) {
                 best = "noop";
             } else if (myMoves.length === 1) {
@@ -281,30 +270,26 @@
                 best = mcsMove(myMoves);
             }
             
-            // Format move for communication based on game type
             if (roles.length > 1) {
-                // Multi-player: return in action(params) format
+                // if multi-player
                 if (Array.isArray(best)) {
                     return best[0] + "(" + best.slice(1).join(",") + ")";
                 } else {
-                    return best; // Already formatted or special move
+                    return best;
                 }
             } else {
-                // Single-player: also return in action(params) format
+                // if single player
                 if (Array.isArray(best)) {
                     if (best.length >= 2) {
-                        // Return "move(h)" format for ['move', 'h']
                         return best[0] + "(" + best[1] + ")";
                     } else {
-                        return best[0] + "()"; // Empty params as fallback
+                        return best[0] + "()";
                     }
                 } else {
-                    // If already a string, ensure it's in the right format
                     var match = String(best).match(/^([a-z]+)\((.*)\)$/);
                     if (match) {
-                        return best; // Already in the right format
+                        return best;
                     } else {
-                        // Add the formatting if it's just a raw value
                         return "move(" + best + ")";
                     }
                 }
@@ -333,68 +318,49 @@
          * Find best move using Monte Carlo Search
          */
         function mcsMove(legalMoves) {
-            console.log("MCS MOVE: Finding best move...");
-            
             var myMoves = legalMoves || findLegalMovesForRole(role, state, library, isGrounded);
             var n = myMoves.length;
-            
-            console.log("Legal moves count: " + n);
-            
             if (n === 0) {
-                console.error("No legal moves found in mcsMove! Using noop");
                 return "noop";
             }
-            
             if (n === 1) return myMoves[0];
 
             var scores = [];
-            var visits = [];
-            
-            // Initialize with precomputed values when available, or start fresh if not
+            var visits = [];            
             var usingPrecomputed = false;
             if (precomputedMoves.length > 0 && arraysEqual(precomputedMoves, myMoves)) {
-                // Use the precomputed values from startclock
                 scores = globalScores.slice();
                 visits = globalVisits.slice();
                 usingPrecomputed = true;
-                console.log("USING precomputed values (" + 
-                   visits.reduce((a, b) => a + b, 0) + " total precomputed visits)");
             } else {
-                // Reset for a fresh search
                 scores = new Array(n).fill(0);
                 visits = new Array(n).fill(0);
-                console.log("NOT using precomputed values");
             }
 
             var deadline = now() + playclock * 1000 - timeBuffer;
             var idx = 0;
-
             var bestMove = myMoves[0];
             var bestAvg = scores[0] / Math.max(visits[0], 1);
-            var bestMoves = [0]; // Track indices of moves with the best score
-
-            // Update best move based on precomputed values
+            var bestMoves = [0];
             if (usingPrecomputed) {
-                bestMoves = []; // Reset best moves list
+                bestMoves = [];
                 for (var i = 0; i < n; i++) {
                     if (visits[i] > 0) {
                         var avg = scores[i] / visits[i];
                         if (avg > bestAvg) {
                             bestAvg = avg;
                             bestMove = myMoves[i];
-                            bestMoves = [i]; // New best move, clear previous ties
+                            bestMoves = [i];
                         } else if (avg === bestAvg) {
-                            bestMoves.push(i); // Tied for best, add to list
+                            bestMoves.push(i);
                         }
                     }
                 }
             }
 
-            var totalSimulations = 0;
-            console.log("Starting play-time MCS simulations...");
-            
+            var totalSims = 0;
             while (now() < deadline) {
-                if (idx >= n) idx = 0; // round‑robin root actions
+                if (idx >= n) idx = 0;
 
                 var joint = randomJointMove(state, myMoves[idx]);
                 var nextSt = simulate(joint, state, library);
@@ -402,56 +368,28 @@
 
                 scores[idx] += score;
                 visits[idx] += 1;
-                totalSimulations++;
+                totalSims++;
 
                 var avg = scores[idx] / visits[idx];
                 if (avg > bestAvg) {
                     bestAvg = avg;
                     bestMove = myMoves[idx];
-                    bestMoves = [idx]; // New best move, clear previous ties
+                    bestMoves = [idx];
                 } else if (avg === bestAvg && !bestMoves.includes(idx)) {
-                    bestMoves.push(idx); // Add to tied moves if not already there
+                    bestMoves.push(idx);
                 }
                 idx += 1;
             }
-            
-            // Store the updated statistics for potential future use
+
             globalScores = scores.slice();
             globalVisits = visits.slice();
             precomputedMoves = myMoves.slice();
-            
-            // Summarize results
-            var moveStats = [];
-            for (var i = 0; i < n; i++) {
-                if (visits[i] > 0) {
-                    moveStats.push("Move " + i + ": avg=" + (scores[i] / visits[i]).toFixed(2) + 
-                                  " (" + visits[i] + " visits)");
-                }
-            }
-            
-            console.log("Completed " + totalSimulations + " new simulations during play");
-            console.log("Move stats: " + moveStats.join(", "));
-            
-            // If all moves have same score, randomly select from the best moves
             if (bestMoves.length > 1) {
                 var randomIndex = randint(bestMoves.length);
                 var selectedIdx = bestMoves[randomIndex];
                 bestMove = myMoves[selectedIdx];
-                console.log("TIE DETECTED - randomly selected move idx: " + selectedIdx + 
-                  " from " + bestMoves.length + " tied moves with score " + bestAvg.toFixed(2));
-            } else {
-                console.log("SELECTED move idx: " + myMoves.indexOf(bestMove) + 
-                  " with avg score " + bestAvg.toFixed(2));
             }
-            
-            // Log summary statistics at the end
-            console.log("ROLLOUT STATS: total=" + totalRollouts + 
-               ", reached_terminal=" + terminalRollouts + 
-               " (" + Math.round(terminalRollouts/totalRollouts*100) + "%)" +
-               ", nonzero_rewards=" + nonzeroRewardRollouts +
-               " (" + Math.round(nonzeroRewardRollouts/totalRollouts*100) + "%)" +
-               ", max_steps=" + maxSteps);
-            
+
             return bestMove;
         }
 
@@ -465,10 +403,7 @@
             while (!findterminalp(cur, library) && steps < MAX_STEPS) {
                 var joint = [];
                 for (var i = 0; i < roles.length; i++) {
-                    // Get legal moves for this role
                     var roleMoves = [];
-                    
-                    // First try standard approach
                     if (isGrounded) {
                         var moves = grounditems('legal', cur, library);
                         for (var j = 0; j < moves.length; j++) {
@@ -486,13 +421,9 @@
                             }
                         }
                     }
-                    
-                    // If no moves found, derive from available actions (GGP-compliant approach)
                     if (roleMoves.length === 0) {
                         var actions = findactions(library);
                         var usedMoves = [];
-                        
-                        // Find used moves in current state
                         for (var j = 0; j < cur.length; j++) {
                             var item = cur[j];
                             if (Array.isArray(item) && item[0] === 'move') {
@@ -502,7 +433,6 @@
                             }
                         }
                         
-                        // Extract move values from actions and filter out used ones
                         for (var j = 0; j < actions.length; j++) {
                             var action = actions[j];
                             var moveValue = null;
@@ -510,7 +440,6 @@
                             if (Array.isArray(action) && action[0] === 'move' && action.length > 1) {
                                 moveValue = action[1];
                             } else if (typeof action === 'string') {
-                                // Handle string representation
                                 if (action.startsWith('move(') && action.endsWith(')')) {
                                     moveValue = action.substring(5, action.length - 1);
                                 } else if (action.startsWith('move,')) {
@@ -518,7 +447,6 @@
                                 }
                             }
                             
-                            // Add if not already used
                             if (moveValue && usedMoves.indexOf(moveValue) === -1 && roleMoves.indexOf(moveValue) === -1) {
                                 roleMoves.push(moveValue);
                             }
@@ -526,10 +454,8 @@
                     }
                     
                     if (roleMoves.length === 0) {
-                        console.error("No legal moves for role " + roles[i] + " in rollout!");
-                        joint.push("noop"); // Fallback
+                        joint.push("noop");
                     } else {
-                        // If we're here, we have valid moves to choose from
                         var r = Math.floor(Math.random() * roleMoves.length);
                         joint.push(roleMoves[r]);
                     }
@@ -543,13 +469,12 @@
             var isTerminal = findterminalp(cur, library);
             if (isTerminal) terminalRollouts++;
             
-            var result = isTerminal ? numberize(findreward(role, cur, library)) : 0;
-            if (result !== 0) nonzeroRewardRollouts++;
+            var res = isTerminal ? numberize(findreward(role, cur, library)) : 0;
+            if (res !== 0) nonzeroRewardRollouts++;
             
-            return result;
+            return res;
         }
 
-        // Helper function to compare arrays (for checking if precomputed moves match current legal moves)
         function arraysEqual(a, b) {
             if (a.length !== b.length) return false;
             
