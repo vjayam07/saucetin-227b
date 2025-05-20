@@ -34,7 +34,7 @@
   - rollout: Performs the actual game simulation
 
   The player is designed to work well across different game types without game-specific knowledge. The Monte Carlo approach is particularly effective because it:
-  - Doesn't require domain-specific evaluation functions
+  - Doesn’t require domain-specific evaluation functions
   - Can handle games with large branching factors
   - Naturally adapts to different game structures
   - Provides a good balance between exploration and exploitation
@@ -53,6 +53,8 @@
     <script type="text/javascript" src="http://epilog.stanford.edu/javascript/epilog.js"></script>
     <script type="text/javascript" src="http://gamemaster.stanford.edu/javascript/localstorage.js"></script>
     <script type="text/javascript" src="http://gamemaster.stanford.edu/interpreter/general.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/reasoning/ground.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/grounder.js"></script>
     <script type="text/javascript">
         //==============================================================================
         // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
@@ -61,27 +63,23 @@
         var manager = "manager";
         var player = "saucetin";
 
-        var role = "robot";
+        var role = '';
         var rules = [];
-        var startclock = 10;
-        var playclock = 10;
-
         var library = [];
         var roles = [];
         var state = [];
-
-        var timeBuffer = 1000; // 1 second
-        
-        // Add global variables to store MCS statistics across calls
+        var startclock = 10;
+        var playclock = 10;
+        var timeBuffer = 500; // ms
+        var precomputedMoves = [];
         var globalScores = [];
         var globalVisits = [];
-        var precomputedMoves = [];
-
-        // Global counters for rollout statistics
         var totalRollouts = 0;
         var terminalRollouts = 0;
         var nonzeroRewardRollouts = 0;
         var maxSteps = 0;
+        var isGrounded = false; // Flag to track if rules are already grounded
+        var useGroundedRules = false; // Flag to use grounded rules code
 
         //==============================================================================
 
@@ -103,14 +101,56 @@
             rules = rs.slice(1);
             startclock = numberize(sc);
             playclock = numberize(pc);
+            
+            // Simple check for grounded rules - if there are no variables (starting with '?')
+            isGrounded = true;
+            for (var i = 0; i < rules.length; i++) {
+                if (stringify(rules[i]).indexOf('?') !== -1) {
+                    isGrounded = false;
+                    break;
+                }
+            }
+            console.log("Rules detected as " + (isGrounded ? "GROUNDED" : "UNGROUNDED"));
+            
+            // Ground the rules if not already grounded
+            if (!isGrounded) {
+                console.log("Grounding rules before building library...");
+                try {
+                    // Use groundrules from grounder.js with a reasonable time limit
+                    rules = groundrules(rules, 3000);  // 3000ms time limit
+                    isGrounded = true;
+                    useGroundedRules = true;  // Set this flag to use our optimized grounded rules code
+                    console.log("Rules successfully grounded");
+                } catch (e) {
+                    console.error("Error grounding rules: " + e);
+                    console.log("Proceeding with original ungrounded rules");
+                    useGroundedRules = false;
+                }
+            } else {
+                // Rules were already grounded
+                useGroundedRules = true;
+            }
+            
+            // Build library, find roles and initial state
             library = definemorerules([], rules);
+            
+            // Find roles and initial state - these functions are the same for both grounded and ungrounded
             roles = findroles(library);
             state = findinits(library);
             
             console.log("START: Role=" + role + ", Startclock=" + startclock + ", Playclock=" + playclock);
+            console.log("Roles found:", JSON.stringify(roles));
+            console.log("Initial state contains " + state.length + " items");
+            console.log("Using " + (useGroundedRules ? "GROUNDED" : "UNGROUNDED") + " move finding strategy");
             
-            // Implement Headstart strategy: use startclock time to precompute move values
-            var myMoves = findlegals(state, library);
+            // Log the actual control so we can verify whose turn it is
+            console.log("Control is: " + findcontrol(state, library));
+            
+            // Get my legal moves - try multiple methods to ensure we find them
+            console.log("Finding legal moves for role: " + role);
+            var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
+            
+            console.log("Found legal moves:", JSON.stringify(myMoves));
             precomputedMoves = myMoves.slice(); // Store for later use
             var n = myMoves.length;
             
@@ -176,10 +216,108 @@
             return "ready";
         }
 
+        /**
+         * Find legal moves for a specific role using multiple methods to ensure robustness
+         */
+        function findLegalMovesForRole(role, currentState, library, isGrounded) {
+            console.log("********** LEGAL MOVE DEBUGGING **********");
+            console.log("Finding legal moves for role: " + role);
+            
+            // Try standard approaches first
+            var legalMoves = [];
+            
+            // 1. First try standard approach as used in mcs.js
+            var rawFindLegals = findlegals(currentState, library);
+            
+            // 2. Using grounded rules if available
+            if (isGrounded) {
+                var moves = grounditems('legal', currentState, library);
+                for (var i = 0; i < moves.length; i++) {
+                    var move = moves[i];
+                    if (Array.isArray(move) && move.length >= 2 && move[0] === role) {
+                        legalMoves.push(move[1]);
+                    }
+                }
+            } else {
+                var allLegals = findlegals(currentState, library);
+                for (var i = 0; i < allLegals.length; i++) {
+                    var move = allLegals[i];
+                    if (Array.isArray(move) && move[0] === 'legal' && move[1] === role) {
+                        legalMoves.push(move[2]);
+                    }
+                }
+            }
+            
+            // 3. Try compfinds
+            var compResults = compfinds('X', seq('legal', role, 'X'), currentState, library);
+            if (Array.isArray(compResults)) {
+                for (var i = 0; i < compResults.length; i++) {
+                    if (legalMoves.indexOf(compResults[i]) === -1) {
+                        legalMoves.push(compResults[i]);
+                    }
+                }
+            }
+            
+            // 4. Inspect state for move patterns
+            var usedMoves = [];
+            
+            for (var i = 0; i < currentState.length; i++) {
+                var item = currentState[i];
+                if (Array.isArray(item) && item[0] === 'move') {
+                    if (item.length > 1) {
+                        usedMoves.push(item[1]);
+                    }
+                }
+            }
+            
+            // 5. If no legal moves found yet, derive from actions (GGP approach)
+            if (legalMoves.length === 0) {
+                console.log("No moves found through standard methods, deriving from game actions");
+                var actions = findactions(library);
+                
+                // Extract move values from actions and filter out used ones
+                for (var i = 0; i < actions.length; i++) {
+                    var action = actions[i];
+                    var moveValue = null;
+                    
+                    if (Array.isArray(action) && action[0] === 'move' && action.length > 1) {
+                        moveValue = action[1];
+                    } else if (typeof action === 'string') {
+                        // Handle string representation
+                        if (action.startsWith('move(') && action.endsWith(')')) {
+                            moveValue = action.substring(5, action.length - 1);
+                        } else if (action.startsWith('move,')) {
+                            moveValue = action.split(',')[1];
+                        }
+                    }
+                    
+                    // Add if not already used
+                    if (moveValue && usedMoves.indexOf(moveValue) === -1 && legalMoves.indexOf(moveValue) === -1) {
+                        legalMoves.push(moveValue);
+                    }
+                }
+                
+                console.log("Found " + legalMoves.length + " potential legal moves derived from actions");
+            }
+            
+            console.log("Final moves: " + legalMoves.length + " legal moves found");
+            console.log("********** END LEGAL MOVE DEBUGGING **********");
+            
+            return legalMoves;
+        }
+
         function play(move) {
             if (move !== nil) {
                 state = simulate(move, state, library);
                 console.log("Simulated opponent's move");
+                // Log the new state after simulation
+                console.log("STATE AFTER SIMULATION:");
+                for (var i = 0; i < Math.min(state.length, 10); i++) {
+                    console.log(" - " + stringify(state[i]));
+                }
+                if (state.length > 10) {
+                    console.log(" - ... and " + (state.length - 10) + " more items");
+                }
             }
             
             var isMyTurn = findcontrol(state, library) === role;
@@ -187,8 +325,39 @@
             
             if (!isMyTurn) return false;
             
-            var best = mcsMove(); 
-            var formatted = "move(" + best.slice(1).join(",") + ")";
+            var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
+            var best;
+            
+            if (myMoves.length === 0) {
+                console.error("No legal moves found in play! Using noop");
+                best = "noop";
+            } else if (myMoves.length === 1) {
+                best = myMoves[0];
+            } else {
+                best = mcsMove(myMoves);
+            }
+            
+            console.log("Raw move returned: ", best);
+            
+            // Format the move correctly for game communication
+            var formatted;
+            if (Array.isArray(best)) {
+                // Handle array format (uncommon)
+                formatted = "move(" + best.slice(1).join(",") + ")";
+            } else if (typeof best === 'string') {
+                // Check if it's a single letter/value that needs formatting
+                if (best.length === 1 || !best.startsWith('move(')) {
+                    // Based on the game logs, format expected is move(x)
+                    formatted = "move(" + best + ")";
+                } else {
+                    // Already formatted correctly
+                    formatted = best;
+                }
+            } else {
+                // Fallback default
+                formatted = best;
+            }
+            
             console.log("Selected move: " + formatted);
             return formatted;
         }
@@ -203,14 +372,19 @@
         // ================================================================
         //   Basic Monte‑Carlo Search (flat)
         // ================================================================
-        function mcsMove() {
+        function mcsMove(legalMoves) {
             console.log("MCS MOVE: Finding best move...");
             
-            var myMoves = findlegals(state, library);
+            var myMoves = legalMoves || findLegalMovesForRole(role, state, library, isGrounded);
             var n = myMoves.length;
-            console.log("Legal moves: " + n);
             
-            if (n === 0) return false;
+            console.log("Legal moves count: " + n);
+            
+            if (n === 0) {
+                console.error("No legal moves found in mcsMove! Using noop");
+                return "noop";
+            }
+            
             if (n === 1) return myMoves[0];
 
             var scores = [];
@@ -224,7 +398,7 @@
                 visits = globalVisits.slice();
                 usingPrecomputed = true;
                 console.log("USING precomputed values (" + 
-                           visits.reduce((a, b) => a + b, 0) + " total precomputed visits)");
+                   visits.reduce((a, b) => a + b, 0) + " total precomputed visits)");
             } else {
                 // Reset for a fresh search
                 scores = new Array(n).fill(0);
@@ -321,6 +495,43 @@
             return bestMove;
         }
 
+        function randomJointMove(state, myMove) {
+            var joint = [];
+            for (var i = 0; i < roles.length; i++) {
+                if (roles[i] === role) {
+                    joint.push(myMove);
+                } else {
+                    // Get legal moves for this other role
+                    var otherMoves = [];
+                    if (isGrounded) {
+                        var moves = grounditems('legal', state, library);
+                        for (var j = 0; j < moves.length; j++) {
+                            var move = moves[j];
+                            if (Array.isArray(move) && move.length >= 2 && move[0] === roles[i]) {
+                                otherMoves.push(move[1]);
+                            }
+                        }
+                    } else {
+                        var allLegals = findlegals(state, library);
+                        for (var j = 0; j < allLegals.length; j++) {
+                            var move = allLegals[j];
+                            if (Array.isArray(move) && move[0] === 'legal' && move[1] === roles[i]) {
+                                otherMoves.push(move[2]);
+                            }
+                        }
+                    }
+                    
+                    if (otherMoves.length === 0) {
+                        console.error("No legal moves for role " + roles[i] + " in randomJointMove");
+                        joint.push("noop"); // Fallback
+                    } else {
+                        joint.push(otherMoves[randint(otherMoves.length)]);
+                    }
+                }
+            }
+            return joint;
+        }
+
         function rollout(st) {
             var cur = st;
             var steps = 0;
@@ -331,8 +542,74 @@
             while (!findterminalp(cur, library) && steps < MAX_STEPS) {
                 var joint = [];
                 for (var i = 0; i < roles.length; i++) {
-                    var potential_moves = legalMoves(cur, roles[i]);
-                    joint.push(potential_moves[randint(potential_moves.length)]);
+                    // Get legal moves for this role
+                    var roleMoves = [];
+                    
+                    // First try standard approach
+                    if (isGrounded) {
+                        var moves = grounditems('legal', cur, library);
+                        for (var j = 0; j < moves.length; j++) {
+                            var move = moves[j];
+                            if (Array.isArray(move) && move.length >= 2 && move[0] === roles[i]) {
+                                roleMoves.push(move[1]);
+                            }
+                        }
+                    } else {
+                        var allLegals = findlegals(cur, library);
+                        for (var j = 0; j < allLegals.length; j++) {
+                            var move = allLegals[j];
+                            if (Array.isArray(move) && move[0] === 'legal' && move[1] === roles[i]) {
+                                roleMoves.push(move[2]);
+                            }
+                        }
+                    }
+                    
+                    // If no moves found, derive from available actions (GGP-compliant approach)
+                    if (roleMoves.length === 0) {
+                        var actions = findactions(library);
+                        var usedMoves = [];
+                        
+                        // Find used moves in current state
+                        for (var j = 0; j < cur.length; j++) {
+                            var item = cur[j];
+                            if (Array.isArray(item) && item[0] === 'move') {
+                                if (item.length > 1) {
+                                    usedMoves.push(item[1]);
+                                }
+                            }
+                        }
+                        
+                        // Extract move values from actions and filter out used ones
+                        for (var j = 0; j < actions.length; j++) {
+                            var action = actions[j];
+                            var moveValue = null;
+                            
+                            if (Array.isArray(action) && action[0] === 'move' && action.length > 1) {
+                                moveValue = action[1];
+                            } else if (typeof action === 'string') {
+                                // Handle string representation
+                                if (action.startsWith('move(') && action.endsWith(')')) {
+                                    moveValue = action.substring(5, action.length - 1);
+                                } else if (action.startsWith('move,')) {
+                                    moveValue = action.split(',')[1];
+                                }
+                            }
+                            
+                            // Add if not already used
+                            if (moveValue && usedMoves.indexOf(moveValue) === -1 && roleMoves.indexOf(moveValue) === -1) {
+                                roleMoves.push(moveValue);
+                            }
+                        }
+                    }
+                    
+                    if (roleMoves.length === 0) {
+                        console.error("No legal moves for role " + roles[i] + " in rollout!");
+                        joint.push("noop"); // Fallback
+                    } else {
+                        // If we're here, we have valid moves to choose from
+                        var r = Math.floor(Math.random() * roleMoves.length);
+                        joint.push(roleMoves[r]);
+                    }
                 }
                 cur = simulate(joint, cur, library);
                 steps += 1;
@@ -343,25 +620,8 @@
             var isTerminal = findterminalp(cur, library);
             if (isTerminal) terminalRollouts++;
             
-            var result = isTerminal ? findreward(role, cur, library) : 0;
+            var result = isTerminal ? numberize(findreward(role, cur, library)) : 0;
             if (result !== 0) nonzeroRewardRollouts++;
-            
-            // Extra debug for non-zero rewards (important to understand scoring)
-            if (result !== 0 && Math.random() < 0.1) {  // Log 10% of non-zero rewards
-                console.log("NON-ZERO REWARD: " + result + " after " + steps + " steps");
-            }
-            
-            // Log diagnostic info every 100 rollouts to avoid flooding
-            if (Math.random() < 0.01) {  // Sample approximately 1% of rollouts
-                console.log("ROLLOUT DIAG: terminal=" + isTerminal + 
-                   ", steps=" + steps + 
-                   ", hit_limit=" + (steps >= MAX_STEPS) + 
-                   ", reward=" + result);
-                
-                if (isTerminal && result !== 0) {
-                    console.log("NON-ZERO REWARD FOUND: " + result);
-                }
-            }
             
             return result;
         }
