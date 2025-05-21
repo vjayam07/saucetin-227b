@@ -5,10 +5,13 @@
 
   Reflection/Commentary:
   ----------
-  For this assignment, our group created an MCS player  that picks moves using Monte Carlo Search. The idea is that the player goes through attempts of trying out lots of random games at each step (from all possible moves), and then chooses the optimal decision. Our player utilizes a strategy where it runs simulations ahead of time through our initial start time implementation. This allows the algorithm to overall pick moves quicker in the long run. We do also have a deadline on when it must make a decision by to ensure that it doesn’t time out. 
-  Our strategy also keeps track of each move's performance during these simulations where it uses metrics such as  the total scores and number of simulations done to then calculate and see which move looks best. If some of these evaluations are equal then it picks randomly
-  We also explored a Bigswitch strategy where we focused on quickly switching between different simulation methods depending on specific factors to  optimize how the player performed.
-  Our players after testing seems to work pretty well across different types of games. Overall, this straightforward Monte Carlo method sets up a solid base for general game playing and could be improved further down the line.
+  For this assignment, our group worked on creating  a Monte Carlo Search player that incorporates what we learned about grounding, allowing the programmed player to learn the rules and operate faster. However, because grounding is computationally expensive, we tried to make sure our player could work with both ungrounded or grounded rule sets, and decide which option it wanted to be based on the scenario. So, if the rules had variables we implemented a solution that uses a grounder to convert them, and in the scenario they were already grounded, we just continued normally. 
+
+We tested this version of our player comparing how it operated with, without and with hybrid grounding. In general, we found that grounding sped up performance in most games. This was especially true of complicated games. However for simpler games we didn’t see as much of a difference. Our program worked especially well with Hamilton. 
+
+This week our player still represents the core idea of Monte Carlo Search. We reused much of this code from previous Saucetin submissions and mainly focused on adding logic around grounding.
+
+Overall, this assignment really showed us how efficient grounding can be as well as what the tradeoffs are related to computational expense, as well as when grounding is effective (complex games yes, simple games not so much). Our player is overall more developed and is better able to handle different rules due to our added grounding.
   
   
   Core Algorithm Structure:
