@@ -299,6 +299,8 @@
             } else {
                 best = mcsMove(myMoves);
             }
+
+            console.log("Best move: " + best, "roles length: " + roles.length, "Array.isArray(best): " + Array.isArray(best), "best.length: " + best.length);
             
             if (roles.length > 1) {
                 // if multi-player
@@ -311,7 +313,7 @@
                 // if single player
                 if (Array.isArray(best)) {
                     if (best.length >= 2) {
-                        return best[0] + "(" + best[1] + ")";
+                        return best[0] + "(" + best.slice(1).join(",") + ")";
                     } else {
                         return best[0] + "()";
                     }
