@@ -49,6 +49,7 @@
     <script type="text/javascript" src="http://gamemaster.stanford.edu/interpreter/general.js"></script>
     <script type="text/javascript" src="http://gamemaster.stanford.edu/reasoning/ground.js"></script>
     <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/grounder.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/pruner.js"></script>
     <script type="text/javascript">
         //==============================================================================
         // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
@@ -124,23 +125,26 @@
                 // Rules were already grounded
                 useGroundedRules = true;
             }
-
-            if (roles.length === 1) {
-                console.log("Single-player game detected: running pruning algorithm...");
-                try {
-                    rules = pruneRules(rules); // You’ll define this function below
-                    console.log("Pruning complete. Rules reduced to " + rules.length);
-                } catch (e) {
-                    console.warn("Pruning failed: " + e);
-                }
+            
+            // First, create temporary library and find roles to use for pruning
+            var tempLibrary = definemorerules([], rules);
+            roles = findroles(tempLibrary);
+            
+            // Apply pruning to the rules using pruneprogram from pruner.js
+            console.log("Running pruneprogram for role: " + role);
+            try {
+                rules = pruneRules(role, rules);
+                console.log("Pruning complete. Rules reduced to " + rules.length);
+            } catch (e) {
+                console.warn("Pruning failed: " + e);
             }
             
-            // Build library, find roles and initial state
+            // Build final library, find roles and initial state
             rules = definemorerules([], rules);
             rules = groundrules(rules);
             library = definemorerules([],rules);
             
-            // Find roles and initial state - these functions are the same for both grounded and ungrounded
+            // Refresh roles and get initial state with the pruned ruleset
             roles = findroles(library);
             state = findinits(library);
             
@@ -243,20 +247,27 @@
             return legalMoves;
         }
 
-        function pruneRules(rules) {
-                const keepPredicates = ['init', 'legal', 'next', 'terminal', 'goal', 'input', 'true', 'does'];
-                return rules.filter(rule => {
-                    for (var i = 0; i < keepPredicates.length; i++) {
-                        if (Array.isArray(rule) && rule[0] === 'rule') {
-                            const head = rule[1];
-                            if (Array.isArray(head) && head[0] === keepPredicates[i]) {
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
-                });
+        function pruneRules(role, rules) {
+            console.log("Starting rule pruning using pruner.js...");
+            console.log("Original rule count: " + rules.length);
+            
+            try {
+                // Use the pruneprogram function from pruner.js
+                var prunedRules = pruneprogram(role, rules);
+                
+                if (prunedRules && prunedRules.length > 0) {
+                    console.log("Rules pruned successfully. New rule count: " + prunedRules.length);
+                    return prunedRules;
+                } else {
+                    console.log("Pruning returned empty ruleset, using original rules");
+                    return rules;
+                }
+            } catch (e) {
+                console.error("Error during rule pruning: " + e);
+                // Continue with unpruned rules
+                return rules;
             }
+        }
 
         function play(move) {
             if (move !== nil) {
