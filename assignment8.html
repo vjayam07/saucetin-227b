@@ -1,45 +1,53 @@
 <html>
 <!--
-  Monte Carlo Search Implementation: Comprehensive Analysis
+Monte Carlo Search Implementation with Rule Optimization
   =======================================================
 
   Reflection/Commentary:
   ----------
-  *Enter reflection here*
-  ----------------------
-  Our implementation uses a flat Monte Carlo Search approach, which means we evaluate moves by performing random rollouts from each possible move. For each move, we maintain two key statistics: the total score accumulated across all simulations and the number of times we've visited that move. This allows us to calculate an average score for each move, which we use to make our final selection.
+  Our implementation builds on the core Monte Carlo Search approach, enhanced with three powerful optimization techniques:
+  
+  1. Rule Grounding: We automatically detect and ground variables in rules, significantly improving performance
+     in complex games by pre-computing rule evaluations.
+  
+  2. Rule Pruning: We integrate the pruneprogram function from pruner.js to eliminate irrelevant rules during 
+     initialization, substantially reducing the ruleset size and improving evaluation speed.
+  
+  3. Metagaming: We leverage the start clock to perform move precomputation, giving our player a strategic
+     head start when evaluating positions in subsequent turns.
 
+  This combination of enhancements enables our player to handle both simple and complex games efficiently,
+  with automatic detection of when to apply each optimization. The player adapts to both single and multi-player
+  scenarios, handling various action formats while maintaining a consistent internal representation.
+  
   Resource Management:
   ------------------
-  We implement careful time management through a deadline-based approach. The search continues until we reach a deadline calculated as the playclock minus a 500ms buffer. This ensures we always have time to return a move. We also limit individual rollouts to 200 steps to prevent infinite simulations in games with long or infinite paths.
+  We implement careful time management through a deadline-based approach. The search continues until we reach a deadline calculated as the playclock minus a buffer. This ensures we always have time to return a move. We also limit individual rollouts to prevent infinite simulations in games with long or infinite paths. During the start clock, we maximize our advantage by precomputing evaluations that can be reused during actual gameplay.
 
   Search Strategy:
   ------------------
-  Our search strategy revolves around three key components:
-  1. Move selection: We cycle through all legal moves, giving each move an equal opportunity for simulation
-  2. Random joint move generation: For each simulation, we generate random moves for all players
-  3. Rollout evaluation: We simulate games until termination or step limit, using the final reward as the score
+  Our search strategy revolves around four key components:
+  1. Rule optimization: We prune irrelevant rules to reduce computational overhead
+  2. Precomputation: We utilize the start clock to build initial statistics for moves
+  3. Move selection: We cycle through all legal moves, giving each move an equal opportunity for simulation
+  4. Rollout evaluation: We simulate games until termination or step limit, using the final reward as the score
 
   Implementation Details:
   --------------------
-  The implementation includes several helper functions that make the code more modular and maintainable:
-  - legalMoves: Handles role-specific move generation
-  - randomJointMove: Creates random joint moves for all players
-  - rollout: Performs the actual game simulation
-
-  The player is designed to work well across different game types without game-specific knowledge. The Monte Carlo approach is particularly effective because it:
-  - Doesn’t require domain-specific evaluation functions
-  - Can handle games with large branching factors
-  - Naturally adapts to different game structures
-  - Provides a good balance between exploration and exploitation
+  The implementation includes several key components that make the code more efficient and adaptable:
+  - Rule grounding: Automatic detection and processing of ungrounded rules
+  - Rule pruning: Integration with pruner.js to eliminate irrelevant rules
+  - Metagaming: Precomputation during start clock with result reuse during gameplay
+  - Move formatting: Sophisticated parsing and formatting for various game types
+  - findLegalMovesForRole: Enhanced detection of legal moves using multiple methods
+  - mcsMove: Monte Carlo selection leveraging precomputed values when available
 
   Testing and Performance:
   ---------------------
-  We tested the final agent against various opponents and found that it performs particularly well in games where:
-  - The branching factor is high
-  - The game length is moderate
-  - The reward structure is clear
-  The flat MCS approach provides a robust foundation for game playing that can be extended with more sophisticated techniques in the future.
+Kelvin add table here.
+  
+  The combination of pruning, grounding, and metagaming provides a solid foundation for general game playing
+  that balances computational efficiency with strategic depth.
   -->
 
 <head>
