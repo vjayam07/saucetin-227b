@@ -1,0 +1,584 @@
+<html>
+<!--
+Monte Carlo Search Implementation with Rule Optimization
+  =======================================================
+
+  Reflection/Commentary:
+  ----------
+  Our implementation builds on the core Monte Carlo Search approach, enhanced with three powerful optimization techniques:
+  
+  1. Rule Grounding: We automatically detect and ground variables in rules, significantly improving performance
+     in complex games by pre-computing rule evaluations.
+  
+  2. Rule Pruning: We integrate the pruneprogram function from pruner.js to eliminate irrelevant rules during 
+     initialization, substantially reducing the ruleset size and improving evaluation speed.
+  
+  3. Metagaming: We leverage the start clock to perform move precomputation, giving our player a strategic
+     head start when evaluating positions in subsequent turns.
+
+  This combination of enhancements enables our player to handle both simple and complex games efficiently,
+  with automatic detection of when to apply each optimization. The player adapts to both single and multi-player
+  scenarios, handling various action formats while maintaining a consistent internal representation.
+  
+  Resource Management:
+  ------------------
+  We implement careful time management through a deadline-based approach. The search continues until we reach a deadline calculated as the playclock minus a buffer. This ensures we always have time to return a move. We also limit individual rollouts to prevent infinite simulations in games with long or infinite paths. During the start clock, we maximize our advantage by precomputing evaluations that can be reused during actual gameplay.
+
+  Search Strategy:
+  ------------------
+  Our search strategy revolves around four key components:
+  1. Rule optimization: We prune irrelevant rules to reduce computational overhead
+  2. Precomputation: We utilize the start clock to build initial statistics for moves
+  3. Move selection: We cycle through all legal moves, giving each move an equal opportunity for simulation
+  4. Rollout evaluation: We simulate games until termination or step limit, using the final reward as the score
+
+  Implementation Details:
+  --------------------
+  The implementation includes several key components that make the code more efficient and adaptable:
+  - Rule grounding: Automatic detection and processing of ungrounded rules
+  - Rule pruning: Integration with pruner.js to eliminate irrelevant rules
+  - Metagaming: Precomputation during start clock with result reuse during gameplay
+  - Move formatting: Sophisticated parsing and formatting for various game types
+  - findLegalMovesForRole: Enhanced detection of legal moves using multiple methods
+  - mcsMove: Monte Carlo selection leveraging precomputed values when available
+
+  Testing and Performance:
+  ---------------------
+Kelvin add table here.
+  
+  The combination of pruning, grounding, and metagaming provides a solid foundation for general game playing
+  that balances computational efficiency with strategic depth.
+  -->
+
+<head>
+    <title>saucetin</title>
+    <script type="text/javascript" src="http://epilog.stanford.edu/javascript/epilog.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/javascript/localstorage.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/interpreter/general.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/reasoning/ground.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/grounder.js"></script>
+    <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/pruner.js"></script>
+    <script type="text/javascript">
+        //==============================================================================
+        // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
+        //==============================================================================
+
+        var manager = "manager";
+        var player = "saucetin";
+
+        var role = '';
+        var rules = [];
+        var library = [];
+        var roles = [];
+        var state = [];
+        var startclock = 10;
+        var playclock = 10;
+        var timeBuffer = 3000; // ms
+        var precomputedMoves = [];
+        var globalScores = [];
+        var globalVisits = [];
+        var totalRollouts = 0;
+        var terminalRollouts = 0;
+        var nonzeroRewardRollouts = 0;
+        var maxSteps = 0;
+        var isGrounded = false; // Flag to track if rules are already grounded
+        var useGroundedRules = false; // Flag to use grounded rules code
+
+        //==============================================================================
+
+        function now() {
+            return Date.now();
+        }
+        function randint(n) {
+            return Math.floor(Math.random() * n);
+        }
+
+        //==============================================================================
+
+        function ping() {
+            return "ready";
+        }
+
+        function start(r, rs, sc, pc) {
+            role = r;
+            rules = rs.slice(1);
+            startclock = parseInt(sc);
+            playclock = parseInt(pc);
+            
+            // Simple check for grounded rules - if there are no variables (starting with '?')
+            isGrounded = true;
+            for (var i = 0; i < rules.length; i++) {
+                if (stringify(rules[i]).indexOf('?') >= 0) {
+                    isGrounded = false;
+                    break;
+                }
+            }
+            console.log("Rules detected as " + (isGrounded ? "GROUNDED" : "UNGROUNDED"));
+            
+            // Ground the rules if not already grounded
+            if (!isGrounded) {
+                console.log("Grounding rules before building library...");
+                try {
+                    // Use groundrules from grounder.js with a reasonable time limit
+                    rules = groundrules(rules, 3000);  // 3000ms time limit
+                    isGrounded = true;
+                    useGroundedRules = true;  // Set this flag to use our optimized grounded rules code
+                    console.log("Rules successfully grounded");
+                } catch (e) {
+                    console.error("Error grounding rules: " + e);
+                    console.log("Proceeding with original ungrounded rules");
+                    useGroundedRules = false;
+                }
+            } else {
+                // Rules were already grounded
+                useGroundedRules = true;
+            }
+            
+            // First, create temporary library and find roles to use for pruning
+            var tempLibrary = definemorerules([], rules);
+            roles = findroles(tempLibrary);
+            
+            // Apply pruning to the rules using pruneprogram from pruner.js
+            console.log("Running pruneprogram for role: " + role);
+            try {
+                rules = pruneRules(role, rules);
+                console.log("Pruning complete. Rules reduced to " + rules.length);
+            } catch (e) {
+                console.warn("Pruning failed: " + e);
+            }
+            
+            // Build final library, find roles and initial state
+            rules = definemorerules([], rules);
+            rules = groundrules(rules);
+            library = definemorerules([],rules);
+            
+            // Refresh roles and get initial state with the pruned ruleset
+            roles = findroles(library);
+            state = findinits(library);
+            
+            console.log("START: Role=" + role + ", Startclock=" + startclock + ", Playclock=" + playclock);
+            console.log("Roles found:", JSON.stringify(roles));
+            console.log("Initial state contains " + state.length + " items");
+            console.log("Using " + (useGroundedRules ? "GROUNDED" : "UNGROUNDED") + " move finding strategy");
+            
+            // Log the actual control so we can verify whose turn it is
+            console.log("Control is: " + findcontrol(state, library));
+            
+            // Get my legal moves - try multiple methods to ensure we find them
+            console.log("Finding legal moves for role: " + role);
+            var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
+            
+            console.log("Found legal moves:", JSON.stringify(myMoves));
+            precomputedMoves = myMoves.slice(); // Store for later use
+            var n = myMoves.length;
+            
+            console.log("Legal moves count: " + n);
+            
+            // Initialize the statistics arrays
+            globalScores = new Array(n).fill(0);
+            globalVisits = new Array(n).fill(0);
+            
+            // If only one move is available, no need for precomputation
+            if (n > 1) {
+                var deadline = now() + startclock * 1000 - timeBuffer;
+                var idx = 0;
+                var totalSimulations = 0;
+                
+                console.log("Starting precomputation during startclock...");
+                
+                // Perform simulations until deadline
+                while (now() < deadline) {
+                    if (idx >= n) idx = 0; // round-robin root actions
+                    
+                    var joint = randomJointMove(state, myMoves[idx]);
+                    var nextSt = simulate(joint, state, library);
+                    var score = rollout(nextSt);
+                    
+                    globalScores[idx] += score;
+                    globalVisits[idx] += 1;
+                    totalSimulations++;
+                    
+                    idx += 1;
+                }
+                
+                // Summarize precomputation results
+                var bestPrecompIdx = -1;
+                var bestPrecompAvg = -Infinity;
+                var precompStats = [];
+                
+                for (var i = 0; i < n; i++) {
+                    if (globalVisits[i] > 0) {
+                        var avg = globalScores[i] / globalVisits[i];
+                        precompStats.push("Move " + i + ": avg=" + avg.toFixed(2) + " (" + globalVisits[i] + " visits)");
+                        
+                        if (avg > bestPrecompAvg) {
+                            bestPrecompAvg = avg;
+                            bestPrecompIdx = i;
+                        }
+                    }
+                }
+                
+                console.log("Precomputation complete: " + totalSimulations + " total simulations");
+                console.log("Move stats: " + precompStats.join(", "));
+                if (bestPrecompIdx >= 0) {
+                    console.log("Best precomputed move: " + bestPrecompIdx + " with avg " + bestPrecompAvg.toFixed(2));
+                }
+            }
+            
+            // Reset statistics
+            totalRollouts = 0;
+            terminalRollouts = 0;
+            nonzeroRewardRollouts = 0;
+            maxSteps = 0;
+            
+            return "ready";
+        }
+
+        /**
+         * Find legal moves for a specific role
+         */
+        function findLegalMovesForRole(role, currentState, library, isGrounded) {
+            console.log("Finding legal moves for role: " + role);
+            
+            var rawFindLegals = findlegals(currentState, library);
+            var legalMoves = [];
+            
+            if (rawFindLegals && Array.isArray(rawFindLegals)) {
+                for (var i = 0; i < rawFindLegals.length; i++) {
+                    if (Array.isArray(rawFindLegals[i])) {
+                        legalMoves.push(rawFindLegals[i]);
+                    }
+                }
+            }
+            
+            console.log("Legal moves found: " + legalMoves.length);
+            return legalMoves;
+        }
+
+        function pruneRules(role, rules) {
+            console.log("Starting rule pruning using pruner.js...");
+            console.log("Original rule count: " + rules.length);
+            
+            try {
+                // Use the pruneprogram function from pruner.js
+                var prunedRules = pruneprogram(role, rules);
+                
+                if (prunedRules && prunedRules.length > 0) {
+                    console.log("Rules pruned successfully. New rule count: " + prunedRules.length);
+                    return prunedRules;
+                } else {
+                    console.log("Pruning returned empty ruleset, using original rules");
+                    return rules;
+                }
+            } catch (e) {
+                console.error("Error during rule pruning: " + e);
+                // Continue with unpruned rules
+                return rules;
+            }
+        }
+
+        function play(move) {
+            if (move !== nil) {
+                try {
+                    var moveToSimulate = move;
+                    if (typeof move === 'string') {
+                        var actionMatch = move.match(/^([a-z]+)\((.*)\)$/);
+                        if (actionMatch) {
+                            var actionType = actionMatch[1];
+                            var params = actionMatch[2].split(',');
+                        
+                            params = params.map(p => /^\d+$/.test(p) ? Number(p) : p);
+                            moveToSimulate = [actionType].concat(params);
+                        }
+                    }
+                    state = simulate(moveToSimulate, state, library);
+                } catch (e) {
+                    console.error("State update failed");
+                }
+            }
+            
+            if (findcontrol(state, library) !== role) return false;
+            var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
+            var best;
+            if (myMoves.length === 0) {
+                best = "noop";
+            } else if (myMoves.length === 1) {
+                best = myMoves[0];
+            } else {
+                best = mcsMove(myMoves);
+            }
+
+            console.log("Best move: " + best, "roles length: " + roles.length, "Array.isArray(best): " + Array.isArray(best), "best.length: " + best.length);
+            
+            if (roles.length > 1) {
+                // if multi-player
+                if (Array.isArray(best)) {
+                    return best[0] + "(" + best.slice(1).join(",") + ")";
+                } else {
+                    return best;
+                }
+            } else {
+                // if single player
+                if (Array.isArray(best)) {
+                    if (best.length >= 2) {
+                        return best[0] + "(" + best.slice(1).join(",") + ")";
+                    } else {
+                        return best[0] + "()";
+                    }
+                } else {
+                    var match = String(best).match(/^([a-z]+)\((.*)\)$/);
+                    if (match) {
+                        return best;
+                    } else {
+                        return "move(" + best + ")";
+                    }
+                }
+            }
+        }
+
+        function randomJointMove(state, myMove) {
+            var joint = [];
+            for (var i = 0; i < roles.length; i++) {
+                if (roles[i] === role) {
+                    joint.push(myMove);
+                } else {
+                    var otherLegals = findLegalMovesForRole(roles[i], state, library, isGrounded);
+                    if (otherLegals.length === 0) {
+                        joint.push("noop");
+                    } else {
+                        var r = Math.floor(Math.random() * otherLegals.length);
+                        joint.push(otherLegals[r]);
+                    }
+                }
+            }
+            return joint;
+        }
+
+        /**
+         * Find best move using Monte Carlo Search
+         */
+        function mcsMove(legalMoves) {
+            var myMoves = legalMoves || findLegalMovesForRole(role, state, library, isGrounded);
+            var n = myMoves.length;
+            if (n === 0) {
+                return "noop";
+            }
+            if (n === 1) return myMoves[0];
+
+            var scores = [];
+            var visits = [];            
+            var usingPrecomputed = false;
+            if (precomputedMoves.length > 0 && arraysEqual(precomputedMoves, myMoves)) {
+                scores = globalScores.slice();
+                visits = globalVisits.slice();
+                usingPrecomputed = true;
+            } else {
+                scores = new Array(n).fill(0);
+                visits = new Array(n).fill(0);
+            }
+
+            var deadline = now() + playclock * 1000 - timeBuffer;
+            var idx = 0;
+            var bestMove = myMoves[0];
+            var bestAvg = scores[0] / Math.max(visits[0], 1);
+            var bestMoves = [0];
+            if (usingPrecomputed) {
+                bestMoves = [];
+                for (var i = 0; i < n; i++) {
+                    if (visits[i] > 0) {
+                        var avg = scores[i] / visits[i];
+                        if (avg > bestAvg) {
+                            bestAvg = avg;
+                            bestMove = myMoves[i];
+                            bestMoves = [i];
+                        } else if (avg === bestAvg) {
+                            bestMoves.push(i);
+                        }
+                    }
+                }
+            }
+
+            var totalSims = 0;
+            while (now() < deadline) {
+                if (idx >= n) idx = 0;
+
+                var joint = randomJointMove(state, myMoves[idx]);
+                var nextSt = simulate(joint, state, library);
+                var score = rollout(nextSt);
+
+                scores[idx] += score;
+                visits[idx] += 1;
+                totalSims++;
+
+                var avg = scores[idx] / visits[idx];
+                if (avg > bestAvg) {
+                    bestAvg = avg;
+                    bestMove = myMoves[idx];
+                    bestMoves = [idx];
+                } else if (avg === bestAvg && !bestMoves.includes(idx)) {
+                    bestMoves.push(idx);
+                }
+                idx += 1;
+            }
+
+            globalScores = scores.slice();
+            globalVisits = visits.slice();
+            precomputedMoves = myMoves.slice();
+            if (bestMoves.length > 1) {
+                var randomIndex = randint(bestMoves.length);
+                var selectedIdx = bestMoves[randomIndex];
+                bestMove = myMoves[selectedIdx];
+            }
+
+            return bestMove;
+        }
+
+        function rollout(st) {
+            var cur = st;
+            var steps = 0;
+            var MAX_STEPS = 300;
+            
+            totalRollouts++;
+            
+            while (!findterminalp(cur, library) && steps < MAX_STEPS) {
+                var joint = [];
+                for (var i = 0; i < roles.length; i++) {
+                    var roleMoves = [];
+                    if (isGrounded) {
+                        var moves = grounditems('legal', cur, library);
+                        for (var j = 0; j < moves.length; j++) {
+                            var move = moves[j];
+                            if (Array.isArray(move) && move.length >= 2 && move[0] === roles[i]) {
+                                roleMoves.push(move[1]);
+                            }
+                        }
+                    } else {
+                        var allLegals = findlegals(cur, library);
+                        for (var j = 0; j < allLegals.length; j++) {
+                            var move = allLegals[j];
+                            if (Array.isArray(move) && move[0] === 'legal' && move[1] === roles[i]) {
+                                roleMoves.push(move[2]);
+                            }
+                        }
+                    }
+                    if (roleMoves.length === 0) {
+                        var actions = findactions(library);
+                        var usedMoves = [];
+                        for (var j = 0; j < cur.length; j++) {
+                            var item = cur[j];
+                            if (Array.isArray(item) && item[0] === 'move') {
+                                if (item.length > 1) {
+                                    usedMoves.push(item[1]);
+                                }
+                            }
+                        }
+                        
+                        for (var j = 0; j < actions.length; j++) {
+                            var action = actions[j];
+                            var moveValue = null;
+                            
+                            if (Array.isArray(action) && action[0] === 'move' && action.length > 1) {
+                                moveValue = action[1];
+                            } else if (typeof action === 'string') {
+                                if (action.startsWith('move(') && action.endsWith(')')) {
+                                    moveValue = action.substring(5, action.length - 1);
+                                } else if (action.startsWith('move,')) {
+                                    moveValue = action.split(',')[1];
+                                }
+                            }
+                            
+                            if (moveValue && usedMoves.indexOf(moveValue) === -1 && roleMoves.indexOf(moveValue) === -1) {
+                                roleMoves.push(moveValue);
+                            }
+                        }
+                    }
+                    
+                    if (roleMoves.length === 0) {
+                        joint.push("noop");
+                    } else {
+                        var r = Math.floor(Math.random() * roleMoves.length);
+                        joint.push(roleMoves[r]);
+                    }
+                }
+                cur = simulate(joint, cur, library);
+                steps += 1;
+            }
+            
+            if (steps > maxSteps) maxSteps = steps;
+            
+            var isTerminal = findterminalp(cur, library);
+            if (isTerminal) terminalRollouts++;
+            
+            var res = isTerminal ? numberize(findreward(role, cur, library)) : 0;
+            if (res !== 0) nonzeroRewardRollouts++;
+            
+            return res;
+        }
+
+        function arraysEqual(a, b) {
+            if (a.length !== b.length) return false;
+            
+            for (var i = 0; i < a.length; i++) {
+                if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false;
+            }
+            
+            return true;
+        }
+    </script>
+</head>
+
+<body bgcolor="#aabbbb" onload="doinitialize()">
+    <center>
+        <table width="720" cellspacing="0" cellpadding="40" bgcolor="#ffffff">
+            <tr>
+                <td>
+                    <center>
+                        <table width="640" cellpadding="0">
+                            <tr>
+                                <td width="180" align="center" valign="center">
+                                    <img width="130" src="http://gamemaster.stanford.edu/images/ggp.jpg" />
+                                </td>
+                                <td align="center">
+                                    <span style="font-size: 18pt">&nbsp;</span>
+                                    <span style="font-size: 32pt">Gamemaster</span><br />
+                                </td>
+                                <td width="180" align="center" style="color: #000066; font-size: 18px">
+                                    <i>General<br />Game<br />Playing</i>
+                                </td>
+                            </tr>
+                        </table>
+                    </center>
+
+                    <br />
+                    <table width="640" cellpadding="8" cellspacing="0" bgcolor="#f4f8f8" border="1">
+                        <tr height="40">
+                            <td align="center">
+                                <table style="color: #000066; font-size: 18px">
+                                    <tr>
+                                        <td>
+                                            Protocol: localstorage<br />
+                                            Metagamer: none<br />
+                                            Strategy: alpha-beta with iterative deepening<br />
+                                            Identifier:
+                                            <span id="player">saucetin</span>
+                                            <img src="http://gamemaster.stanford.edu/images/pencil.gif"
+                                                onclick="doplayer()" />
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                    <br />
+
+                    <center>
+                        <br />
+                        <textarea id="transcript" style="font-family: courier" rows="30" cols="80" readonly></textarea>
+                    </center>
+                </td>
+            </tr>
+        </table>
+    </center>
+</body>
+
+</html>
