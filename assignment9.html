@@ -235,7 +235,7 @@ Kelvin add table here.
          * Find legal moves for a specific role
          */
         function findLegalMovesForRole(role, currentState, library, isGrounded) {
-            console.log("Finding legal moves for role: " + role);
+            //console.log("Finding legal moves for role: " + role);
             
             var rawFindLegals = findlegals(currentState, library);
             var legalMoves = [];
@@ -402,7 +402,8 @@ Kelvin add table here.
             while (now() < deadline) {
                 console.log("Simulating move " + idx + " of " + n);
                 if (idx >= n) idx = 0; 
-                var joint = randomJointMove(state, myMoves[idx]);
+                var currentMove = myMoves[idx];
+                var joint = randomJointMove(state, currentMove);
                 console.log(now() < deadline);
                 var nextSt = simulate(joint, state, library);
                 console.log(now() < deadline);
@@ -416,7 +417,7 @@ Kelvin add table here.
                 var avg = scores[idx] / visits[idx];
                 if (avg > bestAvg) {
                     bestAvg = avg;
-                    bestMove = myMoves[idx];
+                    bestMove = currentMove;
                     bestMoves = [idx];
                 } else if (avg === bestAvg && !bestMoves.includes(idx)) {
                     bestMoves.push(idx);
@@ -437,91 +438,78 @@ Kelvin add table here.
         }
 
         function rollout(st, deadline) {
-            var cur = st;
+            var currentState = st;
             var steps = 0;
-            var MAX_STEPS = 200;
-            var TIME_CHECK_INTERVAL = 50; // Check time every 50 steps
+            var MAX_STEPS = 5;
+            var DISCOUNT_FACTOR = 0.90;   // Discount factor for future rewards
+            var EPSILON = 0.4;            // Probability of choosing greedy move
+            
+            var totalReward = 0;
+            var discountMultiplier = 1.0;
             
             totalRollouts++;
             
-            while (!findterminalp(cur, library) && steps < MAX_STEPS) {
-                // Check time periodically
-                if (steps % TIME_CHECK_INTERVAL === 0 && now() >= deadline) {
-                    return 0; // Return 0 if we're out of time
+            while (!findterminalp(currentState, library) && steps < MAX_STEPS) {
+                if (now() >= deadline) {
+                    return totalReward;
                 }
+                
+                var stepReward = numberize(findreward(role, currentState, library));
+                totalReward += stepReward * discountMultiplier;
+                
+                discountMultiplier *= DISCOUNT_FACTOR;
                 
                 var joint = [];
                 for (var i = 0; i < roles.length; i++) {
-                    var roleMoves = [];
-                    if (isGrounded) {
-                        var moves = grounditems('legal', cur, library);
-                        for (var j = 0; j < moves.length; j++) {
-                            var move = moves[j];
-                            if (Array.isArray(move) && move.length >= 2 && move[0] === roles[i]) {
-                                roleMoves.push(move[1]);
-                            }
-                        }
-                    } else {
-                        var allLegals = findlegals(cur, library);
-                        for (var j = 0; j < allLegals.length; j++) {
-                            var move = allLegals[j];
-                            if (Array.isArray(move) && move[0] === 'legal' && move[1] === roles[i]) {
-                                roleMoves.push(move[2]);
-                            }
-                        }
-                    }
-                    if (roleMoves.length === 0) {
-                        var actions = findactions(library);
-                        var usedMoves = [];
-                        for (var j = 0; j < cur.length; j++) {
-                            var item = cur[j];
-                            if (Array.isArray(item) && item[0] === 'move') {
-                                if (item.length > 1) {
-                                    usedMoves.push(item[1]);
-                                }
-                            }
-                        }
-                        
-                        for (var j = 0; j < actions.length; j++) {
-                            var action = actions[j];
-                            var moveValue = null;
-                            
-                            if (Array.isArray(action) && action[0] === 'move' && action.length > 1) {
-                                moveValue = action[1];
-                            } else if (typeof action === 'string') {
-                                if (action.startsWith('move(') && action.endsWith(')')) {
-                                    moveValue = action.substring(5, action.length - 1);
-                                } else if (action.startsWith('move,')) {
-                                    moveValue = action.split(',')[1];
-                                }
-                            }
-                            
-                            if (moveValue && usedMoves.indexOf(moveValue) === -1 && roleMoves.indexOf(moveValue) === -1) {
-                                roleMoves.push(moveValue);
-                            }
-                        }
-                    }
+                    var roleMoves = findLegalMovesForRole(roles[i], currentState, library);
                     
                     if (roleMoves.length === 0) {
                         joint.push("noop");
+                    } else if (roles[i] === role && Math.random() < EPSILON) {
+                        // Epsilon-greedy for our agent: choose best immediate reward with probability EPSILON
+                        var bestMoveIdx = 0;
+                        var bestReward = -Infinity;
+                        
+                        for (var j = 0; j < roleMoves.length; j++) {
+                            var testMove = roleMoves[j];
+                            var testJoint = new Array(roles.length).fill("noop");
+                            testJoint[i] = testMove;
+                            
+                            var nextState = simulate(testJoint, currentState, library);
+                            var moveReward = numberize(findreward(role, nextState, library));
+                            
+                            if (moveReward > bestReward) {
+                                bestReward = moveReward;
+                                bestMoveIdx = j;
+                            }
+                        }
+                        
+                        joint.push(roleMoves[bestMoveIdx]);
+                        console.log("Epsilon-greedy chose move with reward: " + bestReward);
                     } else {
+                        // Random move (exploration or other players)
                         var r = Math.floor(Math.random() * roleMoves.length);
                         joint.push(roleMoves[r]);
                     }
                 }
-                cur = simulate(joint, cur, library);
+                
+                currentState = simulate(joint, currentState, library);
                 steps += 1;
             }
             
             if (steps > maxSteps) maxSteps = steps;
             
-            var isTerminal = findterminalp(cur, library);
-            if (isTerminal) terminalRollouts++;
+            var isTerminal = findterminalp(currentState, library);
+            if (isTerminal) {
+                terminalRollouts++;
+                // Add terminal state reward (with discount)
+                var terminalReward = numberize(findreward(role, currentState, library));
+                totalReward += terminalReward * discountMultiplier;
+            }
             
-            var res = isTerminal ? numberize(findreward(role, cur, library)) : 0;
-            if (res !== 0) nonzeroRewardRollouts++;
+            if (totalReward !== 0) nonzeroRewardRollouts++;
             
-            return res;
+            return totalReward;
         }
 
         function arraysEqual(a, b) {
@@ -591,4 +579,3 @@ Kelvin add table here.
 </body>
 
 </html>
-
