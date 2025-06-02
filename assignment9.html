@@ -59,9 +59,6 @@ Kelvin add table here.
     <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/grounder.js"></script>
     <script type="text/javascript" src="http://gamemaster.stanford.edu/metagaming/pruner.js"></script>
     <script type="text/javascript">
-        //==============================================================================
-        // Enhanced legal player implementation with alpha-beta pruning and iterative deepening
-        //==============================================================================
 
         var manager = "manager";
         var player = "saucetin";
@@ -73,7 +70,7 @@ Kelvin add table here.
         var state = [];
         var startclock = 10;
         var playclock = 10;
-        var timeBuffer = 3000; // ms
+        var timeBuffer = 3000; // ms // ! FIX THIS
         var precomputedMoves = [];
         var globalScores = [];
         var globalVisits = [];
@@ -192,7 +189,7 @@ Kelvin add table here.
                     
                     var joint = randomJointMove(state, myMoves[idx]);
                     var nextSt = simulate(joint, state, library);
-                    var score = rollout(nextSt);
+                    var score = rollout(nextSt, deadline);
                     
                     globalScores[idx] += score;
                     globalVisits[idx] += 1;
@@ -251,7 +248,7 @@ Kelvin add table here.
                 }
             }
             
-            console.log("Legal moves found: " + legalMoves.length);
+            // console.log("Legal moves found: " + legalMoves.length);
             return legalMoves;
         }
 
@@ -296,7 +293,7 @@ Kelvin add table here.
                     console.error("State update failed");
                 }
             }
-            
+  
             if (findcontrol(state, library) !== role) return false;
             var myMoves = findLegalMovesForRole(role, state, library, isGrounded);
             var best;
@@ -363,7 +360,10 @@ Kelvin add table here.
             if (n === 0) {
                 return "noop";
             }
-            if (n === 1) return myMoves[0];
+            if (n === 1){
+                console.log(myMoves[0] + " is the only move");
+                 return myMoves[0];
+            }
 
             var scores = [];
             var visits = [];            
@@ -378,7 +378,6 @@ Kelvin add table here.
             }
 
             var deadline = now() + playclock * 1000 - timeBuffer;
-            var idx = 0;
             var bestMove = myMoves[0];
             var bestAvg = scores[0] / Math.max(visits[0], 1);
             var bestMoves = [0];
@@ -399,12 +398,16 @@ Kelvin add table here.
             }
 
             var totalSims = 0;
+            var idx = 0;
             while (now() < deadline) {
-                if (idx >= n) idx = 0;
-
+                console.log("Simulating move " + idx + " of " + n);
+                if (idx >= n) idx = 0; 
                 var joint = randomJointMove(state, myMoves[idx]);
+                console.log(now() < deadline);
                 var nextSt = simulate(joint, state, library);
-                var score = rollout(nextSt);
+                console.log(now() < deadline);
+                var score = rollout(nextSt, deadline);
+                console.log(now() < deadline);
 
                 scores[idx] += score;
                 visits[idx] += 1;
@@ -433,14 +436,20 @@ Kelvin add table here.
             return bestMove;
         }
 
-        function rollout(st) {
+        function rollout(st, deadline) {
             var cur = st;
             var steps = 0;
             var MAX_STEPS = 300;
+            var TIME_CHECK_INTERVAL = 50; // Check time every 50 steps
             
             totalRollouts++;
             
             while (!findterminalp(cur, library) && steps < MAX_STEPS) {
+                // Check time periodically
+                if (steps % TIME_CHECK_INTERVAL === 0 && now() >= deadline) {
+                    return 0; // Return 0 if we're out of time
+                }
+                
                 var joint = [];
                 for (var i = 0; i < roles.length; i++) {
                     var roleMoves = [];
@@ -582,3 +591,4 @@ Kelvin add table here.
 </body>
 
 </html>
+
